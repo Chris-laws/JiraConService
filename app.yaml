@@ -1,0 +1,12 @@
+# Databricks Apps: Startbefehl und Umgebung
+command: ["streamlit", "run", "app.py"]
+env:
+  - name: LIDLALIGN_DATA_SOURCE
+    value: "mock"
+  - name: LIDLALIGN_LLM
+    value: "fake"
+  - name: LIDLALIGN_JIRA_WRITE_ENABLED
+    value: "false"
+  # Für Gemini: Secret im Workspace anlegen und als Ressource "gemini-key" an die App hängen
+  # - name: GEMINI_API_KEY
+  #   valueFrom: "gemini-key"

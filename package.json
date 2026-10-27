@@ -1,0 +1,9 @@
+{
+  "name": "lidlalign",
+  "private": true,
+  "description": "Guard-Einstieg für den Python-Prototyp (npm run guard ruft python -m dev.guard)",
+  "scripts": {
+    "guard": "python -m dev.guard",
+    "test": "python -m pytest"
+  }
+}
