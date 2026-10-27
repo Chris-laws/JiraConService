@@ -1,0 +1,61 @@
+# Streams für die Ticket-Zuordnung.
+# Pilot: 4 ADF-Streams. PLATZHALTER-Namen, bis die echten Stream-Namen und Epics vorliegen.
+# Weiteren Stream hinzufügen: Eintrag kopieren, id/Name/Beschreibung/Schlüsselwörter/Epics anpassen, enabled: true.
+
+streams:
+  - id: disposition
+    name: "Disposition & Bestellung (Platzhalter)"
+    description: >
+      Automatische Bestellvorschläge, Dispositionsparameter, Bestandsführung in der Filiale
+      und im Lager, Mindestbestände, Prognosen für den Absatz.
+    keywords: [Bestellvorschlag, Disposition, Bestand, Mindestbestand, Prognose, Absatz, Nachschub, Bestellung]
+    board: ADF-DISPO
+    enabled: true
+    epics:
+      - {key: ADF-100, title: "Bestellvorschläge und Prognose"}
+      - {key: ADF-101, title: "Bestandsführung und Mindestbestände"}
+
+  - id: logistik
+    name: "Logistik & Warenfluss (Platzhalter)"
+    description: >
+      Warenfluss zwischen Lager und Filiale, Touren, Anlieferung, Wareneingang, Retouren,
+      Abschriften und Warenverlust.
+    keywords: [Lager, Anlieferung, Wareneingang, Tour, Retoure, Abschrift, Warenverlust, LKW, Palette]
+    board: ADF-LOG
+    enabled: true
+    epics:
+      - {key: ADF-200, title: "Wareneingang und Anlieferung"}
+      - {key: ADF-201, title: "Retouren und Abschriften"}
+
+  - id: stammdaten
+    name: "Stammdaten (Platzhalter)"
+    description: >
+      Artikelstammdaten, Lieferantenstammdaten, Filialstammdaten, Sortimentszuordnung,
+      Gebinde und Einheiten.
+    keywords: [Stammdaten, Artikel, Lieferant, Sortiment, Gebinde, Einheit, Filialstamm, EAN]
+    board: ADF-MD
+    enabled: true
+    epics:
+      - {key: ADF-300, title: "Artikel- und Sortimentsstammdaten"}
+      - {key: ADF-301, title: "Lieferanten- und Filialstammdaten"}
+
+  - id: reporting
+    name: "Reporting & Analyse (Platzhalter)"
+    description: >
+      Berichte, Kennzahlen, Dashboards und Auswertungen für Länder und Zentrale,
+      Export von Daten, Performance-Übersichten.
+    keywords: [Bericht, Report, Kennzahl, KPI, Dashboard, Auswertung, Export, Übersicht]
+    board: ADF-REP
+    enabled: true
+    epics:
+      - {key: ADF-400, title: "Länderberichte und Kennzahlen"}
+      - {key: ADF-401, title: "Datenexporte"}
+
+  # Vorbereitet für den Ausbau auf 18 Streams (Beispiel, deaktiviert):
+  - id: beispiel_stream_5
+    name: "Weiterer Stream (Beispiel)"
+    description: "Vorlage für weitere Streams. Mit enabled: true aktivieren."
+    keywords: []
+    board: ""
+    enabled: false
+    epics: []
