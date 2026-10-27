@@ -57,3 +57,7 @@ def test_app_config_has_exact_priorities_and_lifecycle():
     assert cfg.lifecycle[0] == "NEW REQUIREMENT"
     assert "SELECTED FOR DEVELOPMENT" in cfg.lifecycle
     assert cfg.thresholds("hashing")["duplicate"] > cfg.thresholds("hashing")["similar"]
+
+
+def test_countries_start_with_de():
+    assert load_app_config(CONFIG / "settings.yaml").countries[0] == "DE"

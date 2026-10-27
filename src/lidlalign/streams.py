@@ -70,6 +70,7 @@ class AppConfig:
     default_priority: str
     lifecycle: list[str]
     _thresholds: dict
+    countries: tuple[str, ...] = ("DE",)
 
     def thresholds(self, embedder: str) -> dict:
         return self._thresholds.get(embedder) or self._thresholds["default"]
@@ -83,6 +84,7 @@ def load_app_config(path: Path) -> AppConfig:
             default_priority=str(data["default_priority"]),
             lifecycle=list(data["lifecycle"]),
             _thresholds=dict(data["thresholds"]),
+            countries=tuple(str(c) for c in data.get("countries", ["DE"])),
         )
     except KeyError as exc:
         raise ConfigError(f"settings.yaml: Feld fehlt: {exc}") from exc

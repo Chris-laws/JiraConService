@@ -30,3 +30,6 @@ thresholds:
     multi_stream_ratio: 0.80
     multi_stream_min: 0.12
     stream_temperature: 0.03
+
+# Länder für die Ticket-Erfassung
+countries: [DE, AT, BE, BG, CH, CY, CZ, DK, EE, ES, FI, FR, GB, GR, HR, HU, IE, IT, LT, LU, LV, MT, NL, PL, PT, RO, RS, SE, SI, SK]
