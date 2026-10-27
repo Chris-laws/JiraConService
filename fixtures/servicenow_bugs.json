@@ -1,0 +1,6 @@
+[
+  {"number": "INC0041871", "short_description": "Bestellvorschlag rundet Mengen falsch auf Gebinde", "description": "Seit Anfang der Woche schlägt der Bestellvorschlag Mengen vor, die nicht zur Gebindegröße passen. Statt 12 werden 13 Stück bestellt.", "component": "bestellvorschlag", "first_seen": "2026-10-14T07:30:00", "priority": "2 - High", "caller": "Petra Klein, petra.klein@example.com"},
+  {"number": "INC0041902", "short_description": "Wareneingang bricht bei Teillieferung ab", "description": "Beim Buchen einer Teillieferung im Wareneingang erscheint ein Fehler und die Buchung bricht ab.", "component": "wareneingang", "first_seen": "2026-10-15T10:05:00", "priority": "1 - Critical", "caller": "Tom Weber, +49 170 1234567"},
+  {"number": "INC0041950", "short_description": "Länderbericht lädt sehr langsam", "description": "Der Länderbericht Bestandsreichweite braucht mehrere Minuten zum Laden.", "component": "reporting", "first_seen": "2026-10-16T09:00:00", "priority": "3 - Moderate", "caller": "Sara Vogel"},
+  {"number": "INC0042010", "short_description": "Anmeldung am Handscanner schlägt sporadisch fehl", "description": "Mitarbeiter können sich gelegentlich nicht am Handscanner anmelden.", "component": "handscanner", "first_seen": "2026-10-20T06:15:00", "priority": "3 - Moderate", "caller": "Nina Roth"}
+]
