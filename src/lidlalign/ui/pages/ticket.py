@@ -15,9 +15,7 @@ st.caption(t("ticket.intro"))
 
 with st.form("ticket_form"):
     country = st.selectbox(t("ticket.country"), c.app_config.countries, help=t("ticket.country_help"))
-    text = st.text_area(
-        t("ticket.input"), height=180, placeholder=t("ticket.placeholder"), help=t("ticket.input_help")
-    )
+    text = st.text_area(t("ticket.input"), height=180, placeholder=t("ticket.placeholder"), help=t("ticket.input_help"))
     submitted = st.form_submit_button(t("ticket.submit"), type="primary")
 
 if submitted:
@@ -84,7 +82,15 @@ with right:
             st.caption(t("ticket.no_similar"))
         for d in duplicates:
             level = t("ticket.level_duplicate") if d.level == "duplicate" else t("ticket.level_similar")
-            st.markdown(t("ticket.similar_row", level=level, title=d.hit.title, url=d.hit.url, pct=round(d.hit.score * 100)))
+            st.markdown(
+                t(
+                    "ticket.similar_row",
+                    level=level,
+                    title=d.hit.title,
+                    url=d.hit.url,
+                    pct=round(d.hit.score * 100),
+                )
+            )
 
 top = classification.suggestions[0]
 markup = to_jira_markup(

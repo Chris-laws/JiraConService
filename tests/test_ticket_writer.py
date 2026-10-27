@@ -57,7 +57,10 @@ def test_missing_benefit_and_criteria_become_open_questions():
 
 
 def test_priority_keywords():
-    assert writer().draft("Blocker: Filialen können nicht bestellen, alles blockiert, sofort lösen", "DE").priority == "Blocker"
+    assert (
+        writer().draft("Blocker: Filialen können nicht bestellen, alles blockiert, sofort lösen", "DE").priority
+        == "Blocker"
+    )
     assert writer().draft("Dringend: der Export bricht ab und muss heute laufen", "DE").priority == "High"
 
 
@@ -118,3 +121,16 @@ def test_jira_markup_contains_sections():
     assert "* A\n* B" in md
     assert "Epic: ADF-200" in md
     assert "Priorität: High" in md
+
+
+def test_long_first_sentence_is_truncated_to_80_chars():
+    text = "Wort " * 30 + "Ende."
+    title = writer().draft(text, "DE").title
+    assert len(title) == 80
+    assert title.endswith("…")
+
+
+def test_title_of_exactly_80_chars_is_kept():
+    sentence = ("a" * 9 + " ") * 7 + "b" * 9  # 79 Zeichen
+    sentence += "c"  # 80
+    assert writer().draft(sentence + ". Noch mehr Text dazu hier.", "DE").title == sentence

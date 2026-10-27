@@ -106,3 +106,31 @@ def test_related_content_is_similar_not_duplicate(checker):
 
 def test_unrelated_text_has_no_hits(checker):
     assert checker.check("Kantine soll vegetarisches Essen anbieten") == []
+
+
+class FixedEmbedder:
+    """Liefert vorgegebene Vektoren, um Schwellwerte exakt zu testen."""
+
+    name = "fixed"
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def embed(self, texts):
+        import numpy as np
+
+        return np.array([self.mapping.get(t, [0.0, 0.0, 1.0]) for t in texts], dtype=float)
+
+
+def _two_stream_classifier(query_vec, th):
+    a = Stream("a", "A", "a", epics=())
+    b = Stream("b", "B", "b", epics=())
+    emb = FixedEmbedder({a.profile_text(): [1.0, 0.0, 0.0], b.profile_text(): [0.0, 1.0, 0.0], "q": query_vec})
+    return StreamClassifier(StreamRegistry([a, b]), emb, th)
+
+
+def test_ratio_rule_needs_second_stream_above_minimum():
+    th = {**TH, "multi_stream_ratio": 0.8, "multi_stream_min": 0.3}
+    assert _two_stream_classifier([0.5, 0.45, 0.0], th).classify("q").multi_stream is True
+    assert _two_stream_classifier([0.5, 0.29, 0.0], th).classify("q").multi_stream is False
+    assert _two_stream_classifier([0.5, 0.3, 0.0], {**th, "multi_stream_ratio": 0.6}).classify("q").multi_stream

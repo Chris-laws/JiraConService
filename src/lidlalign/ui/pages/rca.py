@@ -83,7 +83,7 @@ if result.candidates:
             ]
         ),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             t("rca.col_component"): st.column_config.NumberColumn(format="%.2f"),
             t("rca.col_time"): st.column_config.NumberColumn(format="%.2f"),

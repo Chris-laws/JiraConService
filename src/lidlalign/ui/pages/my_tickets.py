@@ -62,7 +62,7 @@ table = pd.DataFrame(
 st.dataframe(
     table,
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         t("mine.col_key"): st.column_config.LinkColumn(display_text=r"/browse/(.*)$"),
         t("mine.col_phase"): st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d %%"),

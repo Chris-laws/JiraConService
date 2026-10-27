@@ -17,7 +17,10 @@ Q_DETAILS = "Bitte beschreibe die Anforderung genauer: Was soll sich ändern, f�
 Q_BENEFIT = "Welchen Nutzen hat die Änderung (damit …)?"
 Q_CRITERIA = "Woran erkennt man, dass die Anforderung erfüllt ist? (Akzeptanzkriterien)"
 
-_ROLE = re.compile(r"\bals\s+([\wÄÖÜäöüß-]+(?:\s[\wÄÖÜäöüß-]+)?)\s+(?:möchte|will|brauche|benötige)", re.I)
+_ROLE = re.compile(
+    r"\bals\s+([\wÄÖÜäöüß-]+(?:\s[\wÄÖÜäöüß-]+)?)\s+(?:möchte|will|brauche|benötige)",
+    re.I,
+)
 _GOAL = re.compile(r"(?:möchte|will|brauche|benötige)\s+ich\s+(.+?)(?:,?\s+(?:damit|um)\s|[.!?]|$)", re.I)
 _BENEFIT = re.compile(r"\b(?:damit|um)\s+(.+?)(?:[.!?]|$)", re.I)
 _CRITERION = re.compile(r"\b(soll|sollen|muss|müssen|darf|dürfen)\b", re.I)

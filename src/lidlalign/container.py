@@ -6,7 +6,14 @@ import os
 from dataclasses import dataclass
 from functools import cached_property
 
-from lidlalign.adapters.base import ChangeSource, ConfluenceReader, JiraReader, JiraWriter, Llm, ServiceNowReader
+from lidlalign.adapters.base import (
+    ChangeSource,
+    ConfluenceReader,
+    JiraReader,
+    JiraWriter,
+    Llm,
+    ServiceNowReader,
+)
 from lidlalign.adapters.confluence_rest import ConfluenceRest
 from lidlalign.adapters.gemini import GeminiLlm
 from lidlalign.adapters.jira_rest import JiraRestReader, JiraRestWriter
