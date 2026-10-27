@@ -25,7 +25,7 @@ thresholds:
     multi_stream_min: 0.60
     stream_temperature: 0.05
   hashing:
-    duplicate: 0.60
+    duplicate: 0.55
     similar: 0.25
     multi_stream_ratio: 0.80
     multi_stream_min: 0.12
