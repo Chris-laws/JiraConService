@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 
 from lidlalign.adapters.base import (
@@ -15,6 +15,7 @@ from lidlalign.adapters.base import (
     ServiceNowReader,
 )
 from lidlalign.adapters.confluence_rest import ConfluenceRest
+from lidlalign.adapters.errors import LlmUnavailable
 from lidlalign.adapters.gemini import GeminiLlm
 from lidlalign.adapters.jira_rest import JiraRestReader, JiraRestWriter
 from lidlalign.adapters.mock import MockChangeSource, MockConfluence, MockJira, MockJiraWriter, MockServiceNow
@@ -44,6 +45,7 @@ class Container:
     changes: ChangeSource
     llm: Llm
     embedder: Embedder
+    notices: list[str] = field(default_factory=list)
 
     @property
     def thresholds(self) -> dict:
@@ -80,9 +82,16 @@ class Container:
 
 def build_container(settings: Settings) -> Container:
     s = settings
+    notices: list[str] = []
     if s.llm == "gemini" and s.gemini_api_key:
         llm: Llm = GeminiLlm(s.gemini_api_key, s.gemini_model, s.http_timeout)
         embedder: Embedder = GeminiEmbedder(s.gemini_api_key, s.http_timeout)
+        try:
+            # Einmal beim Start prüfen: Index und Anfragen müssen denselben Embedder nutzen.
+            embedder.embed(["Verbindungstest"])
+        except LlmUnavailable as exc:
+            embedder = HashingEmbedder()
+            notices.append(f"Gemini-Embeddings nicht erreichbar ({exc}); Ähnlichkeitssuche läuft offline.")
     else:
         llm, embedder = OfflineLlm(), HashingEmbedder()
 
@@ -112,4 +121,5 @@ def build_container(settings: Settings) -> Container:
         changes=changes,
         llm=llm,
         embedder=embedder,
+        notices=notices,
     )

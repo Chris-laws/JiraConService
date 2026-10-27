@@ -71,3 +71,23 @@ def test_split_proposal_does_not_repeat_text():
     at.button[0].click().run()
     parts = [m.value for m in at.markdown if m.value.startswith("- **Stammdaten")]
     assert parts and parts[0].count("aktualisiert werden") == 1
+
+
+def test_rca_page_survives_unreachable_index(monkeypatch):
+    from lidlalign.adapters.errors import SourceUnavailable
+    from lidlalign.adapters.mock import MockConfluence
+
+    def down(self):
+        raise SourceUnavailable("Confluence weg")
+
+    monkeypatch.setattr(MockConfluence, "pages", down)
+    from lidlalign.ui.state import get_container
+
+    get_container.clear()
+    try:
+        at = _page("rca").run()
+        at.button[0].click().run()
+        assert not at.exception
+        assert at.error
+    finally:
+        get_container.clear()

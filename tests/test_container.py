@@ -1,6 +1,6 @@
 import pytest
 
-from lidlalign.adapters.errors import WriteDisabled
+from lidlalign.adapters.errors import LlmUnavailable, WriteDisabled
 from lidlalign.adapters.gemini import GeminiLlm
 from lidlalign.adapters.jira_rest import JiraRestReader
 from lidlalign.config import load_settings
@@ -20,7 +20,8 @@ def test_mock_container_wires_all_services():
         c.jira_writer.create_issue({})
 
 
-def test_gemini_settings_use_gemini_adapters():
+def test_gemini_settings_use_gemini_adapters(monkeypatch):
+    monkeypatch.setattr(GeminiEmbedder, "embed", lambda self, texts: HashingEmbedder().embed(texts))
     c = build_container(load_settings({"LIDLALIGN_LLM": "gemini", "GEMINI_API_KEY": "k"}))
     assert isinstance(c.llm, GeminiLlm)
     assert isinstance(c.embedder, GeminiEmbedder)
@@ -35,3 +36,14 @@ def test_live_settings_use_rest_adapters():
     }
     c = build_container(load_settings(env))
     assert isinstance(c.jira, JiraRestReader)
+
+
+def test_unreachable_gemini_embeddings_fall_back_to_offline(monkeypatch):
+    def boom(self, texts):
+        raise LlmUnavailable("kein Egress")
+
+    monkeypatch.setattr(GeminiEmbedder, "embed", boom)
+    c = build_container(load_settings({"LIDLALIGN_LLM": "gemini", "GEMINI_API_KEY": "k"}))
+    assert isinstance(c.embedder, HashingEmbedder)
+    assert c.notices
+    assert c.classifier.classify("Bestellvorschlag").suggestions

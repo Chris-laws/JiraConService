@@ -93,7 +93,11 @@ if result.candidates:
         },
     )
 
-related = c.index.search(f"{bug.short_description}. {bug.description}", k=3, min_score=c.thresholds["similar"])
+try:
+    related = c.index.search(f"{bug.short_description}. {bug.description}", k=3, min_score=c.thresholds["similar"])
+except SourceUnavailable as exc:
+    related = []
+    st.error(t("error.source", detail=str(exc)))
 if related:
     st.markdown(f"**{t('rca.related')}**")
     for hit in related:

@@ -30,6 +30,8 @@ with st.sidebar:
     data_mode = t("app.mode_mock") if container.settings.data_source == "mock" else t("app.mode_live")
     llm_mode = t("app.llm_gemini") if container.llm.available else t("app.llm_offline")
     st.caption(f"{data_mode} · {llm_mode}")
+    for notice in container.notices:
+        st.warning(notice)
 
 nav = st.navigation(
     [st.Page(PAGES_DIR / f"{p.module}.py", title=t(p.title_key), icon=p.icon, url_path=p.module) for p in PAGES]
