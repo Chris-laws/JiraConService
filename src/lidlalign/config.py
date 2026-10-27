@@ -41,8 +41,25 @@ def _opt(env: Mapping[str, str], key: str) -> str | None:
     return value or None
 
 
+def read_dotenv(path: Path) -> dict[str, str]:
+    """Liest eine einfache .env-Datei (KEY=VALUE, # Kommentare). Fehlt sie, ist das Ergebnis leer."""
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.split(" #", 1)[0].strip().strip("'\"")
+        values[key.strip()] = value
+    return values
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
-    env = os.environ if env is None else env
+    if env is None:
+        # Lokal: .env im Projektordner; echte Umgebungsvariablen (z. B. auf Databricks) haben Vorrang.
+        env = {**read_dotenv(ROOT / ".env"), **os.environ}
     data_source = env.get("LIDLALIGN_DATA_SOURCE", "mock").strip().lower()
     llm = env.get("LIDLALIGN_LLM", "fake").strip().lower()
     if data_source not in _DATA_SOURCES:

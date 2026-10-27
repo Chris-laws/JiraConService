@@ -29,3 +29,14 @@ def test_write_flag_parses_truthy_values():
 def test_live_source_requires_urls():
     with pytest.raises(ConfigError):
         load_settings({"LIDLALIGN_DATA_SOURCE": "live"})
+
+
+def test_dotenv_file_is_read_without_overriding_environment(tmp_path):
+    from lidlalign.config import read_dotenv
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# Kommentar\nLIDLALIGN_LLM=gemini   # Inline-Kommentar\nGEMINI_API_KEY='abc'\nLEER=\n", encoding="utf-8"
+    )
+    assert read_dotenv(env_file) == {"LIDLALIGN_LLM": "gemini", "GEMINI_API_KEY": "abc", "LEER": ""}
+    assert read_dotenv(tmp_path / "fehlt.env") == {}
