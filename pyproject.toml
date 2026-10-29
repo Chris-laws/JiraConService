@@ -3,7 +3,7 @@ name = "reqpilot"
 version = "0.1.0"
 description = "Prototyp: einheitliche Anforderungs-Tickets, Duplikatprüfung und Bug-Ursachenanalyse"
 requires-python = ">=3.11"
-dependencies = ["streamlit>=1.45", "numpy>=1.26", "PyYAML>=6.0", "requests>=2.31", "pandas>=2.0", "google-auth>=2.30"]
+dependencies = ["streamlit>=1.50", "numpy>=1.26", "PyYAML>=6.0", "requests>=2.31", "pandas>=2.0", "google-auth>=2.30"]
 
 [build-system]
 requires = ["setuptools>=68"]

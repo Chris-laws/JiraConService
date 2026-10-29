@@ -126,11 +126,25 @@ def test_jira_markup_contains_sections():
 def test_long_first_sentence_is_truncated_to_80_chars():
     text = "Wort " * 30 + "Ende."
     title = writer().draft(text, "DE").title
-    assert len(title) == 80
-    assert title.endswith("…")
+    assert len(title) <= 80
+    assert title.endswith("Wort…")
 
 
 def test_title_of_exactly_80_chars_is_kept():
     sentence = ("a" * 9 + " ") * 7 + "b" * 9  # 79 Zeichen
     sentence += "c"  # 80
     assert writer().draft(sentence + ". Noch mehr Text dazu hier.", "DE").title == sentence
+
+
+def test_offline_title_stops_before_benefit_clause_and_at_word_boundary():
+    d = writer().draft(
+        "Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen "
+        "sichtbar bleiben.",
+        "DE",
+    )
+    assert d.title == "Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können"
+    assert d.goal == d.title
+    long = writer().draft("Sehr " * 12 + "langer Titel ohne Satzende der weiter geht und geht", "DE").title
+    assert long.endswith("…")
+    assert not long[:-1].endswith(" ")
+    assert long[:-1].split()[-1] in ("Sehr", "langer", "Titel", "ohne", "Satzende", "der", "weiter", "geht", "und")

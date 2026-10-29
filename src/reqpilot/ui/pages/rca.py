@@ -4,14 +4,14 @@ import pandas as pd
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
+from reqpilot.ui.components import confidence_badge, page_header, section
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container
-from reqpilot.ui.theme import confidence_label
 
 c = get_container()
 
-st.title(t("rca.title"))
-st.caption(t("rca.intro"))
+page_header("rca")
+st.info(t("rca.disclaimer"), icon=":material/balance:")
 
 try:
     bugs = c.servicenow.bugs()
@@ -20,21 +20,25 @@ except SourceUnavailable as exc:
     st.stop()
 
 if not bugs:
-    st.info(t("rca.no_bugs"))
+    st.info(t("rca.no_bugs"), icon=":material/inbox:")
     st.stop()
 
-bug = st.selectbox(
+pick, go = st.columns([4, 1], vertical_alignment="bottom")
+bug = pick.selectbox(
     t("rca.pick_bug"),
     bugs,
     format_func=lambda b: f"{b.number} · {b.short_description}",
     help=t("rca.pick_bug_help"),
 )
+if go.button(t("rca.submit"), type="primary", icon=":material/troubleshoot:", width="stretch"):
+    st.session_state["rca_bug"] = bug.number
 
-if not st.button(t("rca.submit"), type="primary"):
+if st.session_state.get("rca_bug") != bug.number:
     st.stop()
 
 try:
-    result = c.rca.analyze(bug)
+    with st.spinner(t("rca.working")):
+        result = c.rca.analyze(bug)
 except SourceUnavailable as exc:
     st.error(t("error.source", detail=str(exc)))
     st.stop()
@@ -47,25 +51,21 @@ if not result.conclusive:
     st.warning(t("rca.inconclusive"), icon=":material/help:")
 else:
     top = result.candidates[0]
-    st.success(
-        t(
-            "rca.top",
-            change=top.change.id,
-            title=top.change.title,
-            release=top.change.release or "–",
-            pct=round(top.confidence * 100),
-            word=confidence_label(top.confidence),
-        ),
-        icon=":material/target:",
-    )
-    for reason in top.reasons:
-        st.markdown(f"- {reason}")
-    st.markdown(f"**{t('rca.people')}**")
-    for person, conf in result.people[:3]:
-        st.progress(min(conf, 1.0), text=t("rca.person_row", person=person, pct=round(conf * 100)))
+    cause, people = st.columns([3, 2], gap="large")
+    with cause, st.container(border=True):
+        st.caption(t("rca.top_label"))
+        st.subheader(top.change.title)
+        confidence_badge(top.confidence)
+        st.markdown(t("rca.top_meta", change=top.change.id, release=top.change.release or "–"))
+        for reason in top.reasons:
+            st.markdown(f":material/check_small: {reason}")
+    with people, st.container(border=True):
+        st.markdown(f"**{t('rca.people')}**")
+        for person, conf in result.people[:3]:
+            st.progress(min(conf, 1.0), text=t("rca.person_row", person=person, pct=round(conf * 100)))
 
 if result.candidates:
-    st.markdown(f"**{t('rca.candidates')}**")
+    section("rca.candidates", "rca.candidates_help")
     st.dataframe(
         pd.DataFrame(
             [
@@ -99,8 +99,6 @@ except SourceUnavailable as exc:
     related = []
     st.error(t("error.source", detail=str(exc)))
 if related:
-    st.markdown(f"**{t('rca.related')}**")
+    section("rca.related")
     for hit in related:
-        st.markdown(t("knowledge.source_row", n="•", title=hit.title, url=hit.url, source=hit.source))
-
-st.caption(t("rca.disclaimer"))
+        st.markdown(t("rca.related_row", title=hit.title, url=hit.url, source=hit.source))

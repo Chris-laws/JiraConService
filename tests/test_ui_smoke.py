@@ -14,7 +14,7 @@ def _page(name: str) -> AppTest:
 def test_app_entry_renders():
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
     assert not at.exception
-    assert any("ReqPilot" in m.value for m in at.sidebar.markdown)
+    assert at.sidebar.caption[0].value == "Einheitliche Anforderungen, weniger Doppelarbeit"
 
 
 @pytest.mark.parametrize("name", ["ticket", "my_tickets", "knowledge", "rca"])
@@ -51,15 +51,30 @@ def test_rca_flow_shows_top_cause():
     at = _page("rca").run()
     at.button[0].click().run()
     assert not at.exception
-    assert any("CHG0030110" in s.value for s in at.success)
+    assert any("CHG0030110" in m.value for m in at.markdown)
+    assert at.subheader[0].value.startswith("Rundungslogik")
 
 
-def test_knowledge_flow_lists_sources():
+def test_knowledge_chat_answers_with_sources():
     at = _page("knowledge").run()
-    at.text_input[0].input("Werden regionale Feiertage im Bestellvorschlag berücksichtigt?")
-    at.button[0].click().run()
+    at.chat_input[0].set_value("Werden regionale Feiertage im Bestellvorschlag berücksichtigt?").run()
     assert not at.exception
-    assert any("Quellen" in m.value for m in at.markdown)
+    assert len(at.chat_message) == 2
+    assert any("[1]" in cap.value for cap in at.caption)
+
+
+def test_ticket_example_fills_input():
+    at = _page("ticket").run()
+    at.button_group[0].set_value("ticket.example_2").run()
+    assert "Gebindegröße" in at.text_area[0].value
+
+
+def test_my_tickets_filter_narrows_table():
+    at = _page("my_tickets").run()
+    full = len(at.dataframe[0].value)
+    at.button_group[0].set_value("open").run()
+    assert not at.exception
+    assert len(at.dataframe[0].value) <= full
 
 
 def test_split_proposal_does_not_repeat_text():

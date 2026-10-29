@@ -4,27 +4,41 @@ import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
 from reqpilot.services.ticket_writer import to_jira_markup
+from reqpilot.ui.components import badge_md, confidence_badge_md, page_header, section
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container
-from reqpilot.ui.theme import confidence_label
 
 c = get_container()
+EXAMPLES = ("ticket.example_1", "ticket.example_2", "ticket.example_3")
 
-st.title(t("ticket.title"))
-st.caption(t("ticket.intro"))
+page_header("ticket")
+st.markdown(t("ticket.steps"))
 
-with st.form("ticket_form"):
-    country = st.selectbox(t("ticket.country"), c.app_config.countries, help=t("ticket.country_help"))
-    text = st.text_area(t("ticket.input"), height=180, placeholder=t("ticket.placeholder"), help=t("ticket.input_help"))
-    submitted = st.form_submit_button(t("ticket.submit"), type="primary")
+example = st.pills(
+    t("ticket.examples"), EXAMPLES, format_func=lambda k: t(f"{k}_label"), help=t("ticket.examples_help")
+)
+if example and st.session_state.get("_example_used") != example:
+    st.session_state["ticket_text"] = t(example)
+    st.session_state["_example_used"] = example
+
+with st.form("ticket_form", border=True):
+    left, right = st.columns([1, 4])
+    country = left.selectbox(t("ticket.country"), c.app_config.countries, help=t("ticket.country_help"))
+    text = right.text_area(
+        t("ticket.input"),
+        key="ticket_text",
+        height=160,
+        placeholder=t("ticket.placeholder"),
+        help=t("ticket.input_help"),
+    )
+    submitted = st.form_submit_button(t("ticket.submit"), type="primary", icon=":material/auto_awesome:")
 
 if submitted:
     with st.spinner(t("ticket.working")):
         draft = c.ticket_writer.draft(text, country)
         classification = c.classifier.classify(text)
         try:
-            duplicates = c.duplicates.check(draft.as_text())
-            dup_error = None
+            duplicates, dup_error = c.duplicates.check(draft.as_text()), None
         except SourceUnavailable as exc:
             duplicates, dup_error = [], str(exc)
     st.session_state["ticket_result"] = (draft, classification, duplicates, dup_error)
@@ -33,20 +47,44 @@ if "ticket_result" not in st.session_state:
     st.stop()
 
 draft, classification, duplicates, dup_error = st.session_state["ticket_result"]
+top = classification.suggestions[0]
+likely_dupes = [d for d in duplicates if d.level == "duplicate"]
+
+st.divider()
+section("ticket.result")
+m1, m2, m3 = st.columns(3)
+m1.metric(
+    t("ticket.m_format"),
+    t("ticket.m_complete") if not draft.open_questions else t("ticket.m_questions", n=len(draft.open_questions)),
+    border=True,
+)
+m2.metric(
+    t("ticket.m_stream"),
+    t("ticket.m_unclear") if classification.uncertain else top.stream.name,
+    border=True,
+)
+m3.metric(t("ticket.m_similar"), len(duplicates), border=True, help=t("ticket.m_similar_help"))
+
 if draft.notice:
     st.info(draft.notice, icon=":material/info:")
-
 if classification.multi_stream:
-    st.warning(t("ticket.multi_stream"), icon=":material/call_split:")
-    for part in classification.split_proposal:
-        st.markdown(t("ticket.split_part", stream=part.stream.name, text=part.text))
-
-if any(d.level == "duplicate" for d in duplicates):
+    with st.container(border=True):
+        st.warning(t("ticket.multi_stream"), icon=":material/call_split:")
+        for part in classification.split_proposal:
+            st.markdown(t("ticket.split_part", stream=part.stream.name, text=part.text))
+if likely_dupes:
     st.error(t("ticket.duplicate_found"), icon=":material/content_copy:")
 
 left, right = st.columns([3, 2], gap="large")
 
 with left, st.container(border=True):
+    badges = [
+        badge_md(t("ticket.priority_badge", priority=draft.priority), "violet", ":material/flag:"),
+        badge_md(t("ticket.country_badge", country=draft.country), "gray", ":material/public:"),
+    ]
+    if draft.source == "gemini":
+        badges.append(badge_md(t("ticket.ai_badge"), "blue", ":material/auto_awesome:"))
+    st.markdown(" ".join(badges))
     st.subheader(draft.title)
     st.markdown(t("ticket.story", role=draft.role, goal=draft.goal, benefit=draft.benefit or "…"))
     st.markdown(f"**{t('ticket.criteria')}**")
@@ -55,7 +93,6 @@ with left, st.container(border=True):
             st.markdown(f"- {crit}")
     else:
         st.caption(t("ticket.criteria_missing"))
-    st.markdown(t("ticket.priority", priority=draft.priority))
     if draft.open_questions:
         st.markdown(f"**{t('ticket.questions')}**")
         for q in draft.open_questions:
@@ -67,8 +104,7 @@ with right:
         if classification.uncertain:
             st.caption(t("ticket.stream_uncertain"))
         for s in classification.suggestions:
-            label = t("ticket.confidence", pct=round(s.confidence * 100), word=confidence_label(s.confidence))
-            st.progress(min(max(s.confidence, 0.0), 1.0), text=f"{s.stream.name} · {label}")
+            st.markdown(f"{s.stream.name}  {confidence_badge_md(s.confidence)}")
             if s.matched_keywords:
                 st.caption(t("ticket.keywords", words=", ".join(s.matched_keywords)))
         if classification.epic:
@@ -81,28 +117,28 @@ with right:
         elif not duplicates:
             st.caption(t("ticket.no_similar"))
         for d in duplicates:
-            level = t("ticket.level_duplicate") if d.level == "duplicate" else t("ticket.level_similar")
-            st.markdown(
-                t(
-                    "ticket.similar_row",
-                    level=level,
-                    title=d.hit.title,
-                    url=d.hit.url,
-                    pct=round(d.hit.score * 100),
-                )
+            is_dup = d.level == "duplicate"
+            level = badge_md(
+                t("ticket.level_duplicate") if is_dup else t("ticket.level_similar"),
+                "red" if is_dup else "blue",
+                ":material/content_copy:" if is_dup else ":material/link:",
             )
+            row = t("ticket.similar_row", title=d.hit.title, url=d.hit.url, pct=round(d.hit.score * 100))
+            st.markdown(f"{level}  \n{row}")
 
-top = classification.suggestions[0]
 markup = to_jira_markup(
     draft,
     stream_name=None if classification.uncertain else top.stream.name,
     epic_key=classification.epic.key if classification.epic else None,
 )
-st.subheader(t("ticket.export"))
+st.divider()
+section("ticket.export", "ticket.export_help")
 st.code(markup, language=None)
-st.download_button(t("ticket.download"), markup, file_name="ticket.txt", mime="text/plain")
-st.button(
+b1, b2, _ = st.columns([1, 1, 2])
+b1.download_button(t("ticket.download"), markup, file_name="ticket.txt", mime="text/plain", icon=":material/download:")
+b2.button(
     t("ticket.create_in_jira"),
     disabled=not c.jira_writer.enabled,
     help=t("ticket.create_disabled") if not c.jira_writer.enabled else None,
+    icon=":material/lock:",
 )

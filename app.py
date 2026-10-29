@@ -11,11 +11,11 @@ from reqpilot.config import ConfigError  # noqa: E402
 from reqpilot.ui.i18n import t  # noqa: E402
 from reqpilot.ui.pages_registry import PAGES  # noqa: E402
 from reqpilot.ui.state import get_container  # noqa: E402
-from reqpilot.ui.theme import apply_theme  # noqa: E402
+from reqpilot.ui.theme import ASSETS, apply_theme  # noqa: E402
 
 PAGES_DIR = Path(__file__).parent / "src" / "reqpilot" / "ui" / "pages"
 
-st.set_page_config(page_title=t("app.title"), page_icon=":material/fact_check:", layout="wide")
+st.set_page_config(page_title=t("app.title"), page_icon=str(ASSETS / "icon.svg"), layout="wide")
 apply_theme()
 
 try:
@@ -24,16 +24,24 @@ except ConfigError as exc:
     st.error(t("error.config", detail=str(exc)))
     st.stop()
 
-with st.sidebar:
-    st.markdown(f"### {t('app.title')}")
-    st.caption(t("app.tagline"))
-    data_mode = t("app.mode_mock") if container.settings.data_source == "mock" else t("app.mode_live")
-    llm_mode = t("app.llm_gemini") if container.llm.available else t("app.llm_offline")
-    st.caption(f"{data_mode} · {llm_mode}")
-    for notice in container.notices:
-        st.warning(notice)
-
 nav = st.navigation(
     [st.Page(PAGES_DIR / f"{p.module}.py", title=t(p.title_key), icon=p.icon, url_path=p.module) for p in PAGES]
 )
+
+with st.sidebar:
+    st.caption(t("app.tagline"))
+    live = container.settings.data_source == "live"
+    st.badge(
+        t("app.mode_live") if live else t("app.mode_mock"),
+        color="green" if live else "gray",
+        icon=":material/database:",
+    )
+    st.badge(
+        t("app.llm_gemini") if container.llm.available else t("app.llm_offline"),
+        color="violet" if container.llm.available else "gray",
+        icon=":material/auto_awesome:",
+    )
+    for notice in container.notices:
+        st.warning(notice)
+
 nav.run()

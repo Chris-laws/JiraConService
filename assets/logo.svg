@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="32" viewBox="0 0 160 32" role="img" aria-label="ReqPilot">
+  <rect x="0" y="2" width="28" height="28" rx="7" fill="#4f46e5"/>
+  <path d="M8 16.5l4.2 4.2L20.5 11" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="38" y="22" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="650" fill="#6366f1">ReqPilot</text>
+</svg>

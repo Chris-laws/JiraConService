@@ -1,10 +1,30 @@
-# Farben aus der Tailwind-Palette (siehe src/reqpilot/ui/theme.py), Kontrast prüft der Guard
+# Provisorische Design-Tokens (Tailwind slate/indigo), dokumentiert in docs/DESIGN.md.
+# Kontrast hell und dunkel prüft der Guard (dev/checks/ui.py).
+
 [theme]
-base = "light"
-primaryColor = "#1d4ed8"
-backgroundColor = "#f9fafb"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#111827"
+font = "sans-serif"
+baseRadius = "0.5rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#4f46e5"            # indigo-600
+backgroundColor = "#f8fafc"         # slate-50
+secondaryBackgroundColor = "#f1f5f9" # slate-100
+textColor = "#0f172a"               # slate-900
+borderColor = "#e2e8f0"             # slate-200
+linkColor = "#4338ca"               # indigo-700
+
+[theme.dark]
+primaryColor = "#5a53ea"            # indigo-600 aufgehellt (Kontrast auf dunklem Grund)
+backgroundColor = "#0b1120"         # zwischen slate-900 und slate-950
+secondaryBackgroundColor = "#1e293b" # slate-800
+textColor = "#f1f5f9"               # slate-100
+borderColor = "#334155"             # slate-700
+linkColor = "#a5b4fc"               # indigo-300
+
+[client]
+toolbarMode = "minimal"
 
 [server]
 headless = true

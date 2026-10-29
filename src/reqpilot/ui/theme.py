@@ -1,56 +1,31 @@
-"""Optische Feinheiten. Farben aus der Tailwind-Palette; Kontrast wird im Guard geprüft.
+"""Optische Feinheiten. Farben stehen als Tokens in .streamlit/config.toml (hell und dunkel).
 
-Einzige Stelle mit unsafe_allow_html: statisches CSS ohne Nutzerdaten.
+Einzige Stelle mit unsafe_allow_html: statisches CSS ohne Nutzerdaten und ohne Farben,
+damit hell und dunkel automatisch aus dem Streamlit-Theme kommen.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
-from reqpilot.ui.i18n import t
-
-# Tailwind-Tokens (hell / dunkel). Text auf Hintergrund muss WCAG AA (4.5:1) erfüllen.
-PALETTE = {
-    "light": {
-        "background": "#f9fafb",  # gray-50
-        "surface": "#ffffff",
-        "text": "#111827",  # gray-900
-        "muted": "#4b5563",  # gray-600
-        "accent": "#1d4ed8",  # blue-700
-        "success": "#047857",  # emerald-700
-        "warning": "#b45309",  # amber-700
-        "danger": "#be123c",  # rose-700
-    },
-    "dark": {
-        "background": "#111827",  # gray-900
-        "surface": "#1f2937",  # gray-800
-        "text": "#f9fafb",  # gray-50
-        "muted": "#d1d5db",  # gray-300
-        "accent": "#93c5fd",  # blue-300
-        "success": "#6ee7b7",  # emerald-300
-        "warning": "#fcd34d",  # amber-300
-        "danger": "#fda4af",  # rose-300
-    },
-}
+ASSETS = Path(__file__).resolve().parents[3] / "assets"
 
 _CSS = """
 <style>
-  .block-container { padding-top: 2rem; max-width: 72rem; }
-  h1 { letter-spacing: -0.025em; }
-  [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
-  [data-testid="stVerticalBlockBorderWrapper"] { border-radius: 0.5rem; }
+  .block-container { padding-top: 2.5rem; padding-bottom: 4rem; max-width: 76rem; }
+  h1 { letter-spacing: -0.025em; font-weight: 700; }
+  h2, h3 { letter-spacing: -0.015em; font-weight: 650; }
+  [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; font-size: 1.5rem; }
+  [data-testid="stMetricLabel"] p { font-size: 0.8125rem; opacity: 0.8; }
+  [data-testid="stCaptionContainer"] p { line-height: 1.6; }
+  [data-testid="stCode"] pre { font-size: 0.8125rem; line-height: 1.55; }
+  footer { visibility: hidden; }
 </style>
 """
 
 
 def apply_theme() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
-
-
-def confidence_label(confidence: float) -> str:
-    """Konfidenz als Wort, damit die Aussage nicht nur über Farbe/Zahl transportiert wird."""
-    if confidence >= 0.7:
-        return t("conf.high")
-    if confidence >= 0.4:
-        return t("conf.medium")
-    return t("conf.low")
+    st.logo(str(ASSETS / "logo.svg"), icon_image=str(ASSETS / "icon.svg"), size="large")

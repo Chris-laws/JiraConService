@@ -1,32 +1,50 @@
-"""Wissensabfrage über Jira und Confluence."""
+"""Wissensabfrage über Jira und Confluence, als Chat."""
 
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
+from reqpilot.ui.components import page_header
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container
 
 c = get_container()
+SUGGESTIONS = ("knowledge.suggest_1", "knowledge.suggest_2", "knowledge.suggest_3")
 
-st.title(t("knowledge.title"))
-st.caption(t("knowledge.intro"))
+page_header("knowledge")
+history: list[dict] = st.session_state.setdefault("knowledge_history", [])
 
-with st.form("knowledge_form"):
-    question = st.text_input(t("knowledge.question"), placeholder=t("knowledge.placeholder"), help=t("knowledge.help"))
-    asked = st.form_submit_button(t("knowledge.submit"), type="primary")
+if not history:
+    picked = st.pills(t("knowledge.suggestions"), SUGGESTIONS, format_func=t, help=t("knowledge.help"))
+else:
+    picked = None
+    if st.button(t("knowledge.clear"), icon=":material/delete_sweep:"):
+        history.clear()
+        st.rerun()
 
-if asked and question.strip():
+for turn in history:
+    with st.chat_message("user", avatar=":material/person:"):
+        st.markdown(turn["question"])
+    with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+        if turn.get("notice"):
+            st.caption(turn["notice"])
+        st.markdown(turn["answer"])
+        for n, (title, url, source) in enumerate(turn["sources"], 1):
+            st.caption(t("knowledge.source_row", n=n, title=title, url=url, source=source))
+
+question = st.chat_input(t("knowledge.placeholder")) or (t(picked) if picked else None)
+if question and question.strip():
     try:
         with st.spinner(t("knowledge.working")):
             answer = c.knowledge.ask(question)
     except SourceUnavailable as exc:
         st.error(t("error.source", detail=str(exc)))
         st.stop()
-    if answer.notice:
-        st.info(answer.notice, icon=":material/info:")
-    with st.container(border=True):
-        st.markdown(answer.text)
-    if answer.sources:
-        st.markdown(f"**{t('knowledge.sources')}**")
-        for n, hit in enumerate(answer.sources, 1):
-            st.markdown(t("knowledge.source_row", n=n, title=hit.title, url=hit.url, source=hit.source))
+    history.append(
+        {
+            "question": question,
+            "answer": answer.text,
+            "notice": answer.notice,
+            "sources": [(h.title, h.url, h.source) for h in answer.sources],
+        }
+    )
+    st.rerun()

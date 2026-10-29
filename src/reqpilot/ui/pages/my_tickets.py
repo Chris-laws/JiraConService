@@ -4,21 +4,25 @@ import pandas as pd
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
+from reqpilot.ui.components import page_header
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container, header_user
 
 c = get_container()
+FILTERS = ("all", "open", "done", "rejected")
 
-st.title(t("mine.title"))
-st.caption(t("mine.intro"))
+page_header("mine")
 
 user = header_user()
-if not user:
-    reporters = c.jira.reporters() if hasattr(c.jira, "reporters") else []
-    user = st.selectbox(t("mine.pick_user"), reporters, help=t("mine.pick_user_help")) if reporters else ""
-    user = user or st.text_input(t("mine.email"), help=t("mine.email_help"))
+top_left, top_right = st.columns([3, 1], vertical_alignment="bottom")
+if user:
+    top_left.markdown(t("mine.signed_in", user=user))
 else:
-    st.markdown(t("mine.signed_in", user=user))
+    reporters = c.jira.reporters() if hasattr(c.jira, "reporters") else []
+    if reporters:
+        user = top_left.selectbox(t("mine.pick_user"), reporters, help=t("mine.pick_user_help"))
+    else:
+        user = top_left.text_input(t("mine.email"), help=t("mine.email_help"))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -26,7 +30,7 @@ def _load(email: str):
     return c.my_tickets.for_user(email)
 
 
-if st.button(t("mine.refresh"), icon=":material/refresh:"):
+if top_right.button(t("mine.refresh"), icon=":material/refresh:", width="stretch"):
     _load.clear()
 
 try:
@@ -36,15 +40,27 @@ except SourceUnavailable as exc:
     st.stop()
 
 if not rows:
-    st.info(t("mine.empty"))
+    st.info(t("mine.empty"), icon=":material/inbox:")
     st.stop()
 
-done = sum(r.issue.status == "DONE" for r in rows)
-rejected = sum(r.phase is None for r in rows)
-m1, m2, m3 = st.columns(3)
-m1.metric(t("mine.total"), len(rows))
-m2.metric(t("mine.open"), len(rows) - done - rejected)
-m3.metric(t("mine.done"), done)
+
+def _bucket(row) -> str:
+    if row.phase is None:
+        return "rejected"
+    return "done" if row.issue.status == "DONE" else "open"
+
+
+counts = {f: sum(_bucket(r) == f for r in rows) for f in FILTERS[1:]}
+m1, m2, m3, m4 = st.columns(4)
+m1.metric(t("mine.total"), len(rows), border=True)
+m2.metric(t("mine.open"), counts["open"], border=True)
+m3.metric(t("mine.done"), counts["done"], border=True)
+m4.metric(t("mine.rejected"), counts["rejected"], border=True)
+
+choice = st.segmented_control(
+    t("mine.filter"), FILTERS, default="all", format_func=lambda f: t(f"mine.filter_{f}"), help=t("mine.filter_help")
+)
+visible = [r for r in rows if choice in (None, "all") or _bucket(r) == choice]
 
 table = pd.DataFrame(
     [
@@ -56,17 +72,20 @@ table = pd.DataFrame(
             t("mine.col_stream"): r.issue.stream or "",
             t("mine.col_updated"): r.issue.updated,
         }
-        for r in rows
+        for r in visible
     ]
 )
-st.dataframe(
-    table,
-    hide_index=True,
-    width="stretch",
-    column_config={
-        t("mine.col_key"): st.column_config.LinkColumn(display_text=r"/browse/(.*)$"),
-        t("mine.col_phase"): st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d %%"),
-        t("mine.col_updated"): st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),
-    },
-)
+if table.empty:
+    st.caption(t("mine.filter_empty"))
+else:
+    st.dataframe(
+        table,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            t("mine.col_key"): st.column_config.LinkColumn(display_text=r"/browse/(.*)$", width="small"),
+            t("mine.col_phase"): st.column_config.ProgressColumn(min_value=0, max_value=100, format="%d %%"),
+            t("mine.col_updated"): st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),
+        },
+    )
 st.caption(t("mine.readonly"))

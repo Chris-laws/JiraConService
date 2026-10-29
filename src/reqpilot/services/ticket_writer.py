@@ -64,10 +64,18 @@ def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE.split(text) if s.strip()]
 
 
+_BENEFIT_CUT = re.compile(r",?\s+(?:damit|um)\s.*$", re.I)
+
+
 def _title(text: str) -> str:
     first = _sentences(text)[0] if text else "Neue Anforderung"
-    first = first.rstrip(".!?")
-    return first if len(first) <= TITLE_MAX else first[: TITLE_MAX - 1].rstrip() + "…"
+    first = _BENEFIT_CUT.sub("", first.rstrip(".!?")) or first
+    if len(first) <= TITLE_MAX:
+        return first
+    cut = first[: TITLE_MAX - 1]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def _str_list(value) -> list[str]:

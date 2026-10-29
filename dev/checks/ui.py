@@ -12,15 +12,18 @@ from dev.checks.base import ROOT, UI, Result, st_calls, ui_files
 TEXT_CALLS = {
     "title", "header", "subheader", "markdown", "caption", "info", "warning", "error", "success",
     "button", "form_submit_button", "download_button", "selectbox", "text_input", "text_area", "metric",
+    "badge", "pills", "segmented_control", "chat_input",
 }  # fmt: skip
-INPUT_CALLS = {"selectbox", "text_input", "text_area"}
+INPUT_CALLS = {"selectbox", "text_input", "text_area", "pills", "segmented_control"}
 AA = 4.5
+NON_TEXT = 3.0  # WCAG 1.4.11: Bedienelemente/Flächen gegen Hintergrund
 _LETTERS = re.compile(r"[A-Za-zÄÖÜäöüß]{3,}")
+_ICON = re.compile(r":material/[a-z0-9_]+:")  # Icon-Kürzel sind kein übersetzbarer Text
 
 
 def _has_literal_text(node: ast.AST) -> bool:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return bool(_LETTERS.search(node.value))
+        return bool(_LETTERS.search(_ICON.sub("", node.value)))
     if isinstance(node, ast.JoinedStr):
         return any(_has_literal_text(v) for v in node.values if isinstance(v, ast.Constant))
     return False
@@ -89,25 +92,27 @@ def contrast_ratio(a: str, b: str) -> float:
 
 
 def contrast() -> Result:
-    from reqpilot.ui.theme import PALETTE
-
-    details = []
-    theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
-    pairs = [
-        ("config text/background", theme["textColor"], theme["backgroundColor"]),
-        ("config text/secondary", theme["textColor"], theme["secondaryBackgroundColor"]),
-        ("config Button weiß/primary", "#ffffff", theme["primaryColor"]),
-        ("config primary/background", theme["primaryColor"], theme["backgroundColor"]),
-    ]
-    for mode, p in PALETTE.items():
-        for fg in ("text", "muted", "accent", "success", "warning", "danger"):
-            for bg in ("background", "surface"):
-                pairs.append((f"{mode} {fg}/{bg}", p[fg], p[bg]))
-    for label, fg, bg in pairs:
-        ratio = contrast_ratio(fg, bg)
-        if ratio < AA:
-            details.append(f"{label}: {ratio:.2f} < {AA}")
-    return Result(not details, details or [f"{len(pairs)} Farbpaare ≥ {AA}:1"])
+    """Prüft die Theme-Tokens aus .streamlit/config.toml für hell und dunkel."""
+    config = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
+    details, count = [], 0
+    for mode in ("light", "dark"):
+        theme = config.get(mode)
+        if not theme:
+            details.append(f"[theme.{mode}] fehlt")
+            continue
+        pairs = [
+            ("Text/Hintergrund", theme["textColor"], theme["backgroundColor"], AA),
+            ("Text/Fläche", theme["textColor"], theme["secondaryBackgroundColor"], AA),
+            ("Link/Hintergrund", theme["linkColor"], theme["backgroundColor"], AA),
+            ("Button-Text/Primär", "#ffffff", theme["primaryColor"], AA),
+            ("Primär/Hintergrund", theme["primaryColor"], theme["backgroundColor"], NON_TEXT),
+        ]
+        for label, fg, bg, minimum in pairs:
+            count += 1
+            ratio = contrast_ratio(fg, bg)
+            if ratio < minimum:
+                details.append(f"{mode} {label}: {ratio:.2f} < {minimum}")
+    return Result(not details, details or [f"{count} Farbpaare in hell und dunkel erfüllen WCAG AA"])
 
 
 def a11y() -> Result:
