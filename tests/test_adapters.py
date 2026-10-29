@@ -4,18 +4,18 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from lidlalign.adapters.errors import LlmUnavailable, SourceUnavailable, WriteDisabled
-from lidlalign.adapters.gemini import GeminiLlm
-from lidlalign.adapters.jira_rest import JiraRestReader, JiraRestWriter
-from lidlalign.adapters.mock import (
+from reqpilot.adapters.errors import LlmUnavailable, SourceUnavailable, WriteDisabled
+from reqpilot.adapters.gemini import GeminiLlm
+from reqpilot.adapters.jira_rest import JiraRestReader, JiraRestWriter
+from reqpilot.adapters.mock import (
     MockChangeSource,
     MockConfluence,
     MockJira,
     MockJiraWriter,
     MockServiceNow,
 )
-from lidlalign.adapters.offline_llm import OfflineLlm
-from lidlalign.adapters.servicenow_rest import ServiceNowRest
+from reqpilot.adapters.offline_llm import OfflineLlm
+from reqpilot.adapters.servicenow_rest import ServiceNowRest
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
 

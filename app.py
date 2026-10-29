@@ -7,13 +7,13 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import streamlit as st  # noqa: E402
 
-from lidlalign.config import ConfigError  # noqa: E402
-from lidlalign.ui.i18n import t  # noqa: E402
-from lidlalign.ui.pages_registry import PAGES  # noqa: E402
-from lidlalign.ui.state import get_container  # noqa: E402
-from lidlalign.ui.theme import apply_theme  # noqa: E402
+from reqpilot.config import ConfigError  # noqa: E402
+from reqpilot.ui.i18n import t  # noqa: E402
+from reqpilot.ui.pages_registry import PAGES  # noqa: E402
+from reqpilot.ui.state import get_container  # noqa: E402
+from reqpilot.ui.theme import apply_theme  # noqa: E402
 
-PAGES_DIR = Path(__file__).parent / "src" / "lidlalign" / "ui" / "pages"
+PAGES_DIR = Path(__file__).parent / "src" / "reqpilot" / "ui" / "pages"
 
 st.set_page_config(page_title=t("app.title"), page_icon=":material/fact_check:", layout="wide")
 apply_theme()

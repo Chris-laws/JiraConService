@@ -1,4 +1,4 @@
-# Farben aus der Tailwind-Palette (siehe src/lidlalign/ui/theme.py), Kontrast prüft der Guard
+# Farben aus der Tailwind-Palette (siehe src/reqpilot/ui/theme.py), Kontrast prüft der Guard
 [theme]
 base = "light"
 primaryColor = "#1d4ed8"

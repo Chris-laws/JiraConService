@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from lidlalign.config import ConfigError
-from lidlalign.streams import StreamRegistry, load_app_config
+from reqpilot.config import ConfigError
+from reqpilot.streams import StreamRegistry, load_app_config
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
 

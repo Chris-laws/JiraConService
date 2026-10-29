@@ -22,12 +22,12 @@ ALLOWED_LICENSES = (
     "Unlicense",
     "HPND",
 )
-LICENSE_EXCEPTIONS = {"lidlalign"}
+LICENSE_EXCEPTIONS = {"reqpilot"}
 
 
 def consistency() -> Result:
-    from lidlalign.config import load_settings
-    from lidlalign.container import build_container
+    from reqpilot.config import load_settings
+    from reqpilot.container import build_container
 
     c = build_container(load_settings({}))
     streams = {s.id: s for s in c.streams.all()}
@@ -50,8 +50,8 @@ def consistency() -> Result:
 
 def load() -> Result:
     """Kurzprofil gegen Mocks, nie gegen Live-Systeme."""
-    from lidlalign.config import load_settings
-    from lidlalign.container import build_container
+    from reqpilot.config import load_settings
+    from reqpilot.container import build_container
 
     c = build_container(load_settings({}))
     texts = [i.summary + ". " + i.description for i in c.jira.search_issues()]
@@ -79,7 +79,7 @@ def budget() -> Result:
         PY,
         "-c",
         "import sys; sys.path.insert(0,'src');"
-        "from lidlalign.config import load_settings; from lidlalign.container import build_container;"
+        "from reqpilot.config import load_settings; from reqpilot.container import build_container;"
         "c=build_container(load_settings({})); len(c.index); c.classifier",
     )
     cold = time.perf_counter() - start

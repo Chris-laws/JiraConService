@@ -12,10 +12,10 @@ from dev.checks.base import PY, ROOT, Result, sh
 
 COVERAGE_MIN = 85
 MUTATION_TARGETS = {
-    "src/lidlalign/services/rca.py": "tests/test_rca.py",
-    "src/lidlalign/services/classifier.py": "tests/test_classifier_duplicates.py",
-    "src/lidlalign/services/ticket_writer.py": "tests/test_ticket_writer.py",
-    "src/lidlalign/services/my_tickets.py": "tests/test_my_tickets_knowledge.py",
+    "src/reqpilot/services/rca.py": "tests/test_rca.py",
+    "src/reqpilot/services/classifier.py": "tests/test_classifier_duplicates.py",
+    "src/reqpilot/services/ticket_writer.py": "tests/test_ticket_writer.py",
+    "src/reqpilot/services/my_tickets.py": "tests/test_my_tickets_knowledge.py",
 }
 MUTANTS_PER_FILE = 6
 MUTATION_MIN = 0.7

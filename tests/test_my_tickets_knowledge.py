@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from lidlalign.adapters.errors import LlmUnavailable
-from lidlalign.adapters.mock import MockConfluence, MockJira
-from lidlalign.adapters.offline_llm import OfflineLlm
-from lidlalign.index.embedder import HashingEmbedder
-from lidlalign.index.vector_index import build_knowledge_index
-from lidlalign.services.knowledge import NO_SOURCE, KnowledgeService
-from lidlalign.services.my_tickets import MyTickets
-from lidlalign.streams import load_app_config
+from reqpilot.adapters.errors import LlmUnavailable
+from reqpilot.adapters.mock import MockConfluence, MockJira
+from reqpilot.adapters.offline_llm import OfflineLlm
+from reqpilot.index.embedder import HashingEmbedder
+from reqpilot.index.vector_index import build_knowledge_index
+from reqpilot.services.knowledge import NO_SOURCE, KnowledgeService
+from reqpilot.services.my_tickets import MyTickets
+from reqpilot.streams import load_app_config
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_app_config(ROOT / "config" / "settings.yaml")

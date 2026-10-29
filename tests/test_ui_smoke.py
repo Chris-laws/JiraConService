@@ -4,7 +4,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = ROOT / "src" / "lidlalign" / "ui" / "pages"
+PAGES = ROOT / "src" / "reqpilot" / "ui" / "pages"
 
 
 def _page(name: str) -> AppTest:
@@ -14,7 +14,7 @@ def _page(name: str) -> AppTest:
 def test_app_entry_renders():
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
     assert not at.exception
-    assert any("LidlALign" in m.value for m in at.sidebar.markdown)
+    assert any("ReqPilot" in m.value for m in at.sidebar.markdown)
 
 
 @pytest.mark.parametrize("name", ["ticket", "my_tickets", "knowledge", "rca"])
@@ -74,14 +74,14 @@ def test_split_proposal_does_not_repeat_text():
 
 
 def test_rca_page_survives_unreachable_index(monkeypatch):
-    from lidlalign.adapters.errors import SourceUnavailable
-    from lidlalign.adapters.mock import MockConfluence
+    from reqpilot.adapters.errors import SourceUnavailable
+    from reqpilot.adapters.mock import MockConfluence
 
     def down(self):
         raise SourceUnavailable("Confluence weg")
 
     monkeypatch.setattr(MockConfluence, "pages", down)
-    from lidlalign.ui.state import get_container
+    from reqpilot.ui.state import get_container
 
     get_container.clear()
     try:

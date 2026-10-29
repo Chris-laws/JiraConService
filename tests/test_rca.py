@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from lidlalign.adapters.mock import MockChangeSource, MockServiceNow
-from lidlalign.index.embedder import HashingEmbedder
-from lidlalign.models import Bug, Change
-from lidlalign.services.rca import RootCauseAnalyzer
+from reqpilot.adapters.mock import MockChangeSource, MockServiceNow
+from reqpilot.index.embedder import HashingEmbedder
+from reqpilot.models import Bug, Change
+from reqpilot.services.rca import RootCauseAnalyzer
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
 

@@ -1,4 +1,4 @@
-from lidlalign.privacy import redact
+from reqpilot.privacy import redact
 
 
 def test_masks_email_and_phone():

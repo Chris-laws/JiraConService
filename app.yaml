@@ -1,12 +1,14 @@
 # Databricks Apps: Startbefehl und Umgebung
 command: ["streamlit", "run", "app.py"]
 env:
-  - name: LIDLALIGN_DATA_SOURCE
+  - name: REQPILOT_DATA_SOURCE
     value: "mock"
-  - name: LIDLALIGN_LLM
-    value: "fake"
-  - name: LIDLALIGN_JIRA_WRITE_ENABLED
+  - name: REQPILOT_LLM
+    value: "fake"          # auf "vertex" stellen, sobald Projekt und Service-Account da sind
+  - name: REQPILOT_JIRA_WRITE_ENABLED
     value: "false"
-  # Für Gemini: Secret im Workspace anlegen und als Ressource "gemini-key" an die App hängen
-  # - name: GEMINI_API_KEY
-  #   valueFrom: "gemini-key"
+  # Gemini über Vertex AI (OAuth, kein API-Key):
+  # - name: VERTEX_PROJECT_ID
+  #   value: "mein-projekt-id"
+  # - name: VERTEX_SERVICE_ACCOUNT_JSON
+  #   valueFrom: "vertex-sa"     # Secret mit dem Service-Account-JSON als App-Ressource

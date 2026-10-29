@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from lidlalign.adapters.mock import MockConfluence, MockJira
-from lidlalign.index.embedder import HashingEmbedder
-from lidlalign.index.vector_index import build_knowledge_index
-from lidlalign.models import Epic, Stream
-from lidlalign.services.classifier import StreamClassifier
-from lidlalign.services.duplicates import DuplicateChecker
-from lidlalign.streams import StreamRegistry, load_app_config
+from reqpilot.adapters.mock import MockConfluence, MockJira
+from reqpilot.index.embedder import HashingEmbedder
+from reqpilot.index.vector_index import build_knowledge_index
+from reqpilot.models import Epic, Stream
+from reqpilot.services.classifier import StreamClassifier
+from reqpilot.services.duplicates import DuplicateChecker
+from reqpilot.streams import StreamRegistry, load_app_config
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_app_config(ROOT / "config" / "settings.yaml")

@@ -30,7 +30,7 @@ def _used_keys() -> set[str]:
     keys = set()
     for path in ui_files():
         keys |= set(re.findall(r"\bt\(\s*[\"']([a-z_]+\.[a-z_]+)[\"']", path.read_text(encoding="utf-8")))
-    from lidlalign.ui.pages_registry import PAGES
+    from reqpilot.ui.pages_registry import PAGES
 
     return keys | {p.title_key for p in PAGES}
 
@@ -56,13 +56,13 @@ def _render_in_english() -> list[str]:
     import yaml
     from streamlit.testing.v1 import AppTest
 
-    from lidlalign.ui import i18n as i18n_mod
-    from lidlalign.ui.pages_registry import PAGES
+    from reqpilot.ui import i18n as i18n_mod
+    from reqpilot.ui.pages_registry import PAGES
 
     en = yaml.safe_load((UI / "strings" / "en.yaml").read_text(encoding="utf-8"))
     problems = []
-    old = os.environ.get("LIDLALIGN_LANG")
-    os.environ["LIDLALIGN_LANG"] = "en"
+    old = os.environ.get("REQPILOT_LANG")
+    os.environ["REQPILOT_LANG"] = "en"
     i18n_mod.load_strings.cache_clear()
     try:
         for page in PAGES:
@@ -71,9 +71,9 @@ def _render_in_english() -> list[str]:
                 problems.append(f"EN-Modus: Seite {page.module} nicht englisch oder fehlerhaft")
     finally:
         if old is None:
-            os.environ.pop("LIDLALIGN_LANG", None)
+            os.environ.pop("REQPILOT_LANG", None)
         else:
-            os.environ["LIDLALIGN_LANG"] = old
+            os.environ["REQPILOT_LANG"] = old
     return problems
 
 
@@ -89,7 +89,7 @@ def contrast_ratio(a: str, b: str) -> float:
 
 
 def contrast() -> Result:
-    from lidlalign.ui.theme import PALETTE
+    from reqpilot.ui.theme import PALETTE
 
     details = []
     theme = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
@@ -132,7 +132,7 @@ def a11y() -> Result:
 
 
 def permissions() -> Result:
-    from lidlalign.ui.pages_registry import PAGES
+    from reqpilot.ui.pages_registry import PAGES
 
     files = {p.stem for p in (UI / "pages").glob("*.py") if p.stem != "__init__"}
     registered = {p.module for p in PAGES}

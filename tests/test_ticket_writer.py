@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from lidlalign.adapters.errors import LlmUnavailable
-from lidlalign.adapters.offline_llm import OfflineLlm
-from lidlalign.services.ticket_writer import TicketDraft, TicketWriter, to_jira_markup
+from reqpilot.adapters.errors import LlmUnavailable
+from reqpilot.adapters.offline_llm import OfflineLlm
+from reqpilot.services.ticket_writer import TicketDraft, TicketWriter, to_jira_markup
 
 PRIOS = ["Blocker", "High", "Medium", "Low"]
 

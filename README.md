@@ -1,4 +1,4 @@
-# LidlALign
+# ReqPilot
 
 Prototyp für das Anforderungsmanagement im ADF-Umfeld: einheitliche Anforderungs-Tickets, Duplikat- und
 Ähnlichkeitsprüfung gegen Jira und Confluence, Stream-/Epic-Vorschlag, eigene Tickets verfolgen und
@@ -6,8 +6,8 @@ Ursachenanalyse für ServiceNow-Bugs.
 
 Läuft als **Streamlit-App auf Databricks Apps**. Lokal und ohne Firmennetz funktioniert alles mit Testdaten.
 
-- Design: [docs/superpowers/specs/2026-10-27-lidlalign-design.md](docs/superpowers/specs/2026-10-27-lidlalign-design.md)
-- Umsetzungsplan: [docs/superpowers/plans/2026-10-27-lidlalign-grundgeruest.md](docs/superpowers/plans/2026-10-27-lidlalign-grundgeruest.md)
+- Design: [docs/superpowers/specs/2026-10-27-reqpilot-design.md](docs/superpowers/specs/2026-10-27-reqpilot-design.md)
+- Umsetzungsplan: [docs/superpowers/plans/2026-10-27-reqpilot-grundgeruest.md](docs/superpowers/plans/2026-10-27-reqpilot-grundgeruest.md)
 
 ## Funktionen
 
@@ -26,25 +26,41 @@ pip install -r requirements-dev.txt
 streamlit run app.py
 ```
 
-Ohne weitere Einstellungen: Testdaten aus `fixtures/`, KI offline (regelbasierter Entwurf). Für Gemini:
-`.env.example` nach `.env` kopieren bzw. Variablen setzen: `LIDLALIGN_LLM=gemini`, `GEMINI_API_KEY=…`.
+Ohne weitere Einstellungen: Testdaten aus `fixtures/`, KI offline (regelbasierter Entwurf).
+
+### Gemini anbinden (Vertex AI mit OAuth, kein API-Key)
+
+API-Keys funktionieren in unserem Google-Cloud-Projekt nicht (401/403). Deshalb ruft ReqPilot Gemini über
+Vertex AI mit einem OAuth-Token auf und nennt das Projekt im Header `x-goog-user-project`.
+
+1. Im Cloud-Projekt: Agent Platform API (Vertex AI API) aktiv; das Konto braucht „Vertex AI User“ und
+   „Service Usage Consumer“.
+2. Lokal einmal anmelden: `gcloud auth application-default login`
+3. `.env.example` nach `.env` kopieren und setzen: `REQPILOT_LLM=vertex`, `VERTEX_PROJECT_ID=<projekt-id>`.
+
+| Meldung in der App | Ursache |
+|---|---|
+| „Keine Google-Anmeldung gefunden“ | Schritt 2 fehlt |
+| HTTP 403 | Rolle fehlt, API nicht aktiv oder Projekt-ID falsch (ID, nicht Nummer) |
+| HTTP 404 | Modell in der Region nicht verfügbar → `GEMINI_MODEL` oder `VERTEX_LOCATION` ändern |
 
 ## Auf Databricks Apps deployen
 
 1. Repo als Git-Folder in den Workspace holen.
 2. App anlegen (Compute → Apps → Create app → Custom) und auf den Ordner zeigen; `app.yaml` enthält den Startbefehl.
-3. Gemini-Key als Secret anlegen und als App-Ressource `gemini-key` hinterlegen, dann in `app.yaml` die
-   `GEMINI_API_KEY`-Zeilen einkommentieren und `LIDLALIGN_LLM` auf `gemini` setzen.
+3. Für Gemini: Auf Databricks gibt es kein Nutzer-Token wie in Apps Script. Ein Service-Account mit den
+   Rollen oben wird gebraucht; sein JSON als Secret anlegen, als App-Ressource `vertex-sa` hinterlegen und in
+   `app.yaml` `VERTEX_PROJECT_ID`/`VERTEX_SERVICE_ACCOUNT_JSON` einkommentieren, `REQPILOT_LLM` auf `vertex`.
 4. Zugriff für die Business-User über die App-Berechtigungen vergeben. Die Anmeldung läuft über den Workspace;
    die App liest die E-Mail aus dem Header `X-Forwarded-Email` (für „Meine Tickets“).
 
 ## Auf Live-Daten umschalten
 
-`LIDLALIGN_DATA_SOURCE=live` und `JIRA_URL`, `JIRA_PAT`, `CONFLUENCE_URL`, `CONFLUENCE_PAT`, `CONFLUENCE_SPACES`,
+`REQPILOT_DATA_SOURCE=live` und `JIRA_URL`, `JIRA_PAT`, `CONFLUENCE_URL`, `CONFLUENCE_PAT`, `CONFLUENCE_SPACES`,
 `SERVICENOW_URL`, `SERVICENOW_TOKEN` setzen. Voraussetzung: Die App erreicht die Systeme im Firmennetz.
 Bugs kommen aus der ServiceNow-Tabelle `incident`, Changes/Patches aus `change_request`.
 
-**Jira-Schreiben ist abgeschaltet** (`LIDLALIGN_JIRA_WRITE_ENABLED=false`). Der Adapter existiert, der Knopf
+**Jira-Schreiben ist abgeschaltet** (`REQPILOT_JIRA_WRITE_ENABLED=false`). Der Adapter existiert, der Knopf
 „In Jira anlegen“ bleibt deaktiviert, bis das bewusst freigegeben wird.
 
 ## Streams pflegen
@@ -58,7 +74,7 @@ Neuer Stream (bis zu 18): Eintrag kopieren, `id`, `name`, `description`, `keywor
 
 ```
 app.py                      Einstieg (Databricks Apps / lokal)
-src/lidlalign/
+src/reqpilot/
   config.py                 Einstellungen aus Umgebung
   streams.py                Stream-Registry und fachliche Konfiguration
   adapters/                 Jira, Confluence, ServiceNow, Gemini (live) und Mocks; Protokolle in base.py
@@ -90,7 +106,7 @@ Gemini-Antworten, rechtliche Bewertung der Ursachenanalyse (Personenbezug).
 ## Offene Punkte
 
 - Echte Namen, Beschreibungen und Epics der 4 ADF-Pilotstreams.
-- Erreicht Databricks das interne Jira/Confluence/ServiceNow? Ist Egress zur Gemini-API erlaubt?
+- Erreicht Databricks das interne Jira/Confluence/ServiceNow und `aiplatform.googleapis.com`? Darf ein Service-Account für Vertex angelegt werden?
 - Quelle für Patch-/Release-Daten bestätigen (angenommen: ServiceNow `change_request`).
 - Schwellwerte mit echten Daten nachjustieren.
 - Lizenz für das Repository festlegen.
@@ -98,5 +114,5 @@ Gemini-Antworten, rechtliche Bewertung der Ursachenanalyse (Personenbezug).
 ## Markenhinweis
 
 Jira und Confluence sind Marken von Atlassian, ServiceNow ist eine Marke von ServiceNow, Inc., Databricks ist
-eine Marke von Databricks, Inc., Gemini ist eine Marke von Google LLC. Lidl ist eine Marke der Lidl Stiftung & Co. KG.
+eine Marke von Databricks, Inc., Gemini ist eine Marke von Google LLC.
 Die Nennung dient nur der Beschreibung der Schnittstellen.

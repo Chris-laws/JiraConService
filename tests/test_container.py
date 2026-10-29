@@ -1,11 +1,11 @@
 import pytest
 
-from lidlalign.adapters.errors import LlmUnavailable, WriteDisabled
-from lidlalign.adapters.gemini import GeminiLlm
-from lidlalign.adapters.jira_rest import JiraRestReader
-from lidlalign.config import load_settings
-from lidlalign.container import build_container
-from lidlalign.index.embedder import GeminiEmbedder, HashingEmbedder
+from reqpilot.adapters.errors import LlmUnavailable, WriteDisabled
+from reqpilot.adapters.gemini import GeminiLlm
+from reqpilot.adapters.jira_rest import JiraRestReader
+from reqpilot.config import load_settings
+from reqpilot.container import build_container
+from reqpilot.index.embedder import GeminiEmbedder, HashingEmbedder
 
 
 def test_mock_container_wires_all_services():
@@ -22,14 +22,14 @@ def test_mock_container_wires_all_services():
 
 def test_gemini_settings_use_gemini_adapters(monkeypatch):
     monkeypatch.setattr(GeminiEmbedder, "embed", lambda self, texts: HashingEmbedder().embed(texts))
-    c = build_container(load_settings({"LIDLALIGN_LLM": "gemini", "GEMINI_API_KEY": "k"}))
+    c = build_container(load_settings({"REQPILOT_LLM": "gemini", "GEMINI_API_KEY": "k"}))
     assert isinstance(c.llm, GeminiLlm)
     assert isinstance(c.embedder, GeminiEmbedder)
 
 
 def test_live_settings_use_rest_adapters():
     env = {
-        "LIDLALIGN_DATA_SOURCE": "live",
+        "REQPILOT_DATA_SOURCE": "live",
         "JIRA_URL": "https://jira",
         "CONFLUENCE_URL": "https://conf",
         "SERVICENOW_URL": "https://sn",
@@ -43,7 +43,17 @@ def test_unreachable_gemini_embeddings_fall_back_to_offline(monkeypatch):
         raise LlmUnavailable("kein Egress")
 
     monkeypatch.setattr(GeminiEmbedder, "embed", boom)
-    c = build_container(load_settings({"LIDLALIGN_LLM": "gemini", "GEMINI_API_KEY": "k"}))
+    c = build_container(load_settings({"REQPILOT_LLM": "gemini", "GEMINI_API_KEY": "k"}))
     assert isinstance(c.embedder, HashingEmbedder)
     assert c.notices
     assert c.classifier.classify("Bestellvorschlag").suggestions
+
+
+def test_vertex_settings_use_vertex_adapters(monkeypatch):
+    from reqpilot.adapters.vertex import VertexLlm
+    from reqpilot.index.embedder import VertexEmbedder
+
+    monkeypatch.setattr(VertexEmbedder, "embed", lambda self, texts: HashingEmbedder().embed(texts))
+    c = build_container(load_settings({"REQPILOT_LLM": "vertex", "VERTEX_PROJECT_ID": "p"}))
+    assert isinstance(c.llm, VertexLlm)
+    assert isinstance(c.embedder, VertexEmbedder)

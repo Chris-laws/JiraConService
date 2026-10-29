@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src" / "lidlalign"
+SRC = ROOT / "src" / "reqpilot"
 UI = SRC / "ui"
 PY = sys.executable
 

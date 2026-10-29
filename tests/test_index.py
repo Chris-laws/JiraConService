@@ -2,9 +2,9 @@ from pathlib import Path
 
 import numpy as np
 
-from lidlalign.adapters.mock import MockConfluence, MockJira
-from lidlalign.index.embedder import HashingEmbedder, tokens
-from lidlalign.index.vector_index import IndexItem, VectorIndex, build_knowledge_index
+from reqpilot.adapters.mock import MockConfluence, MockJira
+from reqpilot.index.embedder import HashingEmbedder, tokens
+from reqpilot.index.vector_index import IndexItem, VectorIndex, build_knowledge_index
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures"
 

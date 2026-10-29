@@ -3,3 +3,4 @@ numpy>=1.26
 PyYAML>=6.0
 requests>=2.31
 pandas>=2.0
+google-auth>=2.30
