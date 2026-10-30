@@ -4,11 +4,12 @@ import pandas as pd
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
-from reqpilot.ui.components import card_title, confidence_badge, page_header, tile
+from reqpilot.ui.components import card_title, confidence_badge, page_header
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container
 
 c = get_container()
+RECENT_ROWS = 6
 
 page_header("rca")
 
@@ -22,7 +23,7 @@ if not bugs:
     st.info(t("rca.no_bugs"), icon=":material/inbox:")
     st.stop()
 
-side, main = st.columns([4, 8], gap="medium")
+side, main = st.columns([4, 8])
 
 with side, st.container(key="card_bug"):
     card_title("rca.pick_title", "rca.disclaimer")
@@ -38,12 +39,24 @@ with side, st.container(key="card_bug"):
     st.caption(bug.description)
 
 if st.session_state.get("rca_bug") != bug.number:
-    with main, st.container(key="card_empty"):
-        st.markdown(f"### {t('rca.empty_title')}")
-        st.caption(t("rca.empty_text"))
-        tile("component", ":material/widgets:", "rca.tile_component", "rca.tile_component_text")
-        tile("time", ":material/schedule:", "rca.tile_time", "rca.tile_time_text")
-        tile("text", ":material/compare:", "rca.tile_text", "rca.tile_text_text")
+    with main, st.container(key="card_changes"):
+        card_title("rca.changes_title", "rca.empty_text")
+        try:
+            changes = sorted(c.changes.changes(), key=lambda ch: ch.deployed_at, reverse=True)[:RECENT_ROWS]
+        except SourceUnavailable as exc:
+            changes = []
+            st.error(t("error.source", detail=str(exc)))
+        for ch in changes:
+            st.markdown(
+                t(
+                    "rca.change_row",
+                    id=ch.id,
+                    url=ch.url,
+                    title=ch.title,
+                    component=", ".join(ch.components) or "–",
+                    date=ch.deployed_at.strftime("%d.%m.%Y"),
+                )
+            )
     st.stop()
 
 try:
@@ -69,7 +82,7 @@ with main:
         st.warning(t("rca.inconclusive"), icon=":material/help:")
     else:
         top = result.candidates[0]
-        cause, people = st.columns([3, 2], gap="medium")
+        cause, people = st.columns([3, 2])
         with cause, st.container(key="card_cause"):
             st.caption(t("rca.top_label"))
             st.subheader(top.change.title)

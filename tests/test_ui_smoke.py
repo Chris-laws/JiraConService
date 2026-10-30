@@ -14,7 +14,7 @@ def _page(name: str) -> AppTest:
 def test_app_entry_renders():
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30).run()
     assert not at.exception
-    assert at.sidebar.caption[0].value == "Einheitliche Anforderungen, weniger Doppelarbeit"
+    assert at.sidebar.caption[0].value == "Pilot ADF · Anforderungen im Standard"
 
 
 @pytest.mark.parametrize("name", ["ticket", "my_tickets", "knowledge", "rca"])
@@ -108,16 +108,17 @@ def test_rca_page_survives_unreachable_index(monkeypatch):
         get_container.clear()
 
 
-def test_ticket_shows_empty_state_before_submit():
+def test_ticket_shows_recent_tickets_before_submit():
     at = _page("ticket").run()
-    assert any(m.value.startswith("### Hier erscheint") for m in at.markdown)
+    assert 1 <= sum("/browse/ADF-" in m.value for m in at.markdown) <= 8
     assert not at.code
 
 
-def test_rca_explains_signals_before_analysis():
+def test_rca_lists_changes_before_analysis():
     at = _page("rca").run()
     assert not at.subheader
-    assert any("Zeitliche Nähe" in m.value for m in at.markdown)
+    assert any("zeitlicher Nähe" in c.value for c in at.caption)
+    assert sum(m.value.startswith("[CHG") for m in at.markdown) == 6
 
 
 def test_knowledge_suggestion_is_asked_once():

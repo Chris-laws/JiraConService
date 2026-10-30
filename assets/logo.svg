@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="160" height="32" viewBox="0 0 160 32" role="img" aria-label="ReqPilot">
-  <rect x="0" y="2" width="28" height="28" rx="7" fill="#4f46e5"/>
-  <path d="M8 16.5l4.2 4.2L20.5 11" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="38" y="22" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="17" font-weight="650" fill="#6366f1">ReqPilot</text>
+  <style>.ink{fill:#141414}.paper{stroke:#ffffff}@media (prefers-color-scheme: dark){.ink{fill:#f2f2f2}.paper{stroke:#0a0a0a}}</style>
+  <!-- Ticket mit Lochkerben, darin der Haken: ein Ticket im Standard -->
+  <path class="ink" d="M4 6h20a2 2 0 0 1 2 2v5a3 3 0 0 0 0 6v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a3 3 0 0 0 0-6V8a2 2 0 0 1 2-2z"/>
+  <path class="paper" d="M9 16.2l3.2 3.2L19 12.6" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="ink" x="36" y="21.5" font-family="Geist, Inter, ui-sans-serif, system-ui, sans-serif" font-size="17" font-weight="600" letter-spacing="-0.2">ReqPilot</text>
 </svg>

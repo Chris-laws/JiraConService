@@ -92,7 +92,9 @@ def contrast_ratio(a: str, b: str) -> float:
 
 
 def contrast() -> Result:
-    """Prüft die Theme-Tokens aus .streamlit/config.toml für hell und dunkel."""
+    """Prüft die Theme-Tokens aus .streamlit/config.toml und die Ergänzungen aus theme.py für hell und dunkel."""
+    from reqpilot.ui.theme import BUTTON_INK, DATA_HUE, SURFACE
+
     config = tomllib.loads((ROOT / ".streamlit" / "config.toml").read_text(encoding="utf-8"))["theme"]
     details, count = [], 0
     for mode in ("light", "dark"):
@@ -104,7 +106,8 @@ def contrast() -> Result:
             ("Text/Hintergrund", theme["textColor"], theme["backgroundColor"], AA),
             ("Text/Fläche", theme["textColor"], theme["secondaryBackgroundColor"], AA),
             ("Link/Hintergrund", theme["linkColor"], theme["backgroundColor"], AA),
-            ("Button-Text/Primär", "#ffffff", theme["primaryColor"], AA),
+            ("Button-Text/Primär", BUTTON_INK[mode], theme["primaryColor"], AA),
+            ("Datenton/Karte", DATA_HUE[mode], SURFACE[mode], NON_TEXT),
             ("Primär/Hintergrund", theme["primaryColor"], theme["backgroundColor"], NON_TEXT),
         ]
         for label, fg, bg, minimum in pairs:
@@ -112,13 +115,6 @@ def contrast() -> Result:
             ratio = contrast_ratio(fg, bg)
             if ratio < minimum:
                 details.append(f"{mode} {label}: {ratio:.2f} < {minimum}")
-    from reqpilot.ui.theme import HERO_COLORS
-
-    for color in HERO_COLORS:  # weiße Schrift im Hero-Band, in beiden Modi gleich
-        count += 1
-        ratio = contrast_ratio("#ffffff", color)
-        if ratio < AA:
-            details.append(f"Hero-Text/Verlauf {color}: {ratio:.2f} < {AA}")
     return Result(not details, details or [f"{count} Farbpaare in hell und dunkel erfüllen WCAG AA"])
 
 

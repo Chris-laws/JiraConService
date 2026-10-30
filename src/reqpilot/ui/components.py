@@ -10,27 +10,24 @@ HIGH = 0.7
 MEDIUM = 0.4
 
 
-def page_header(prefix: str, extra_key: str | None = None) -> None:
-    """Hero-Band mit <prefix>.title, <prefix>.intro und optional einer Zusatzzeile."""
-    with st.container(key="hero"):
-        st.title(t(f"{prefix}.title"))
-        st.caption(t(f"{prefix}.intro"))
-        if extra_key:
-            st.markdown(t(extra_key))
+def page_header(prefix: str) -> None:
+    """Titelzeile: <prefix>.title als Substantiv, darunter <prefix>.intro als ein Satz zu den Daten."""
+    st.title(t(f"{prefix}.title"))
+    st.caption(t(f"{prefix}.intro"))
 
 
-def card_title(title_key: str, caption_key: str | None = None) -> None:
-    """Kopfzeile einer Karte: fetter Titel, optional eine Erklärung darunter."""
-    st.markdown(f"**{t(title_key)}**")
+def card_title(title_key: str, caption_key: str | None = None, **kwargs) -> None:
+    """Kopfzeile einer Karte: Titel, optional eine Erklärung darunter."""
+    st.markdown(f"**{t(title_key, **kwargs)}**")
     if caption_key:
         st.caption(t(caption_key))
 
 
-def tile(key: str, icon: str, title_key: str, text_key: str) -> None:
-    """Kleine Info-Kachel für leere Zustände."""
-    with st.container(key=f"tile_{key}"):
-        st.markdown(f"{icon} **{t(title_key)}**")
-        st.caption(t(text_key))
+def kpi_strip(key: str, items: list[tuple[str, object, str | None]]) -> None:
+    """Kennzahlen als ein Streifen mit Haarlinien statt einzelner Kacheln: (Label, Wert, Hilfe)."""
+    with st.container(key=f"kpis_{key}", horizontal=True):
+        for label, value, help_text in items:
+            st.metric(label, value, help=help_text)
 
 
 def confidence_level(confidence: float) -> str:
