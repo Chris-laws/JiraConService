@@ -9,12 +9,14 @@ from functools import cached_property
 from reqpilot.adapters.base import (
     ChangeSource,
     ConfluenceReader,
+    DocumentSource,
     JiraReader,
     JiraWriter,
     Llm,
     ServiceNowReader,
 )
 from reqpilot.adapters.confluence_rest import ConfluenceRest
+from reqpilot.adapters.documents import LocalDocuments
 from reqpilot.adapters.errors import LlmUnavailable
 from reqpilot.adapters.gemini import GeminiLlm
 from reqpilot.adapters.google_auth import AdcTokenProvider
@@ -30,6 +32,7 @@ from reqpilot.services.classifier import StreamClassifier
 from reqpilot.services.duplicates import DuplicateChecker
 from reqpilot.services.knowledge import KnowledgeService
 from reqpilot.services.my_tickets import MyTickets
+from reqpilot.services.priority import PriorityAdvisor
 from reqpilot.services.rca import RootCauseAnalyzer
 from reqpilot.services.ticket_writer import TicketWriter
 from reqpilot.streams import AppConfig, StreamRegistry, load_app_config
@@ -47,6 +50,7 @@ class Container:
     changes: ChangeSource
     llm: Llm
     embedder: Embedder
+    documents: DocumentSource | None = None
     notices: list[str] = field(default_factory=list)
 
     @property
@@ -55,11 +59,15 @@ class Container:
 
     @cached_property
     def index(self) -> VectorIndex:
-        return build_knowledge_index(self.jira, self.confluence, self.embedder)
+        return build_knowledge_index(self.jira, self.confluence, self.embedder, self.documents)
 
     @cached_property
     def ticket_writer(self) -> TicketWriter:
         return TicketWriter(self.llm, self.app_config.priorities, self.app_config.default_priority)
+
+    @cached_property
+    def priority_advisor(self) -> PriorityAdvisor:
+        return PriorityAdvisor(self.app_config.priorities)
 
     @cached_property
     def classifier(self) -> StreamClassifier:
@@ -131,5 +139,6 @@ def build_container(settings: Settings) -> Container:
         changes=changes,
         llm=llm,
         embedder=embedder,
+        documents=LocalDocuments(s.docs_dir),
         notices=notices,
     )

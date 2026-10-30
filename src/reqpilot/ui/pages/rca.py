@@ -30,6 +30,7 @@ with side, st.container(key="card_bug"):
     bug = st.selectbox(
         t("rca.pick_bug"),
         bugs,
+        index=next((n for n, b in enumerate(bugs) if b.number == st.session_state.get("rca_bug")), 0),
         format_func=lambda b: f"{b.number} · {b.short_description}",
         help=t("rca.pick_bug_help"),
     )
@@ -75,7 +76,7 @@ if related:
     with side, st.container(key="card_related"):
         card_title("rca.related")
         for hit in related:
-            st.markdown(t("rca.related_row", title=hit.title, url=hit.url, source=hit.source))
+            st.markdown(t("rca.related_row", title=hit.title, url=hit.url, source=t(f"source.{hit.source}")))
 
 with main:
     if not result.conclusive:

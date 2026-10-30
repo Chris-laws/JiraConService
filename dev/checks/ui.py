@@ -110,6 +110,13 @@ def contrast() -> Result:
             ("Datenton/Karte", DATA_HUE[mode], SURFACE[mode], NON_TEXT),
             ("Primär/Hintergrund", theme["primaryColor"], theme["backgroundColor"], NON_TEXT),
         ]
+        side = theme.get("sidebar")
+        if side:
+            pairs += [
+                ("Seitenleiste Text", side["textColor"], side["backgroundColor"], AA),
+                ("Seitenleiste Eingabe", side["textColor"], side["secondaryBackgroundColor"], AA),
+                ("Seitenleiste Link", side["linkColor"], side["backgroundColor"], AA),
+            ]
         for label, fg, bg, minimum in pairs:
             count += 1
             ratio = contrast_ratio(fg, bg)

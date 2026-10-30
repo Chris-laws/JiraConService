@@ -1,12 +1,13 @@
-"""Optik der App im Stil "Achromatic ledger" (Taste-Skill, App-Regeln).
+"""Optik der App: "Achromatic ledger" (Taste-Skill) mit Petrol-Seitenleiste und Lebenszyklus-Linie (Impeccable).
 
 Grundfarben stehen als Tokens in .streamlit/config.toml. Hier nur statisches CSS ohne Nutzerdaten, die
 einzige Stelle mit unsafe_allow_html. Flächenfarben laufen über light-dark(), weil .stApp das
 color-scheme des aktiven Streamlit-Themes setzt. Karten sind Container mit key="card_…", Kennzahlen
 Container mit key="kpis_…"; Streamlit hängt daran die Klasse .st-key-<key>.
 
-Regeln: Chrome in Tinte, der eine Datenton (#1d5fbf) nur auf Daten, keine Verläufe, keine Schatten auf
-ruhenden Flächen, Karten mit 1px-Linie und 8px Radius, ein Abstand (12px) überall.
+Regeln: Seitenleiste Petrol (config.toml), Arbeitsfläche in Tinte, der eine Datenton (#1d5fbf) nur auf Daten,
+keine Verläufe, keine Schatten auf ruhenden Flächen, Karten mit 1px-Linie und 8px Radius, ein Abstand (12px)
+überall. Bewegung nur als Rückmeldung (Emil Kowalski): Druck auf 97 %, Hover nur mit Maus, reduced-motion.
 """
 
 from __future__ import annotations
@@ -74,7 +75,8 @@ _CSS = """
     flex: 1 1 auto; display: flex; flex-direction: column; }
   .st-key-card_input .stTextArea { flex: 1 1 auto; display: flex; flex-direction: column; }
   .st-key-card_input .stTextArea > div:has([data-testid="stTextAreaRootElement"]) { flex: 1 1 auto; display: flex; }
-  .st-key-card_input [data-testid="stTextAreaRootElement"] { flex: 1 1 auto; height: auto !important; }
+  .st-key-card_input [data-testid="stTextAreaRootElement"] { flex: 1 1 auto; height: auto !important;
+    min-height: 220px; }
   .st-key-card_input [data-testid="stTextAreaRootElement"] textarea { height: 100% !important; }
 
   /* Kennzahlen: ein Streifen, durch Haarlinien geteilt, keine Kacheln */
@@ -85,9 +87,18 @@ _CSS = """
   [class*="st-key-kpis"] > [data-testid="stElementContainer"]:first-child { padding-left: 0; }
   [class*="st-key-kpis"] > [data-testid="stElementContainer"] + [data-testid="stElementContainer"] {
     border-left: 1px solid var(--rule); }
+  @media (max-width: 640px) {
+    [class*="st-key-kpis"] { flex-wrap: wrap !important; row-gap: 12px !important; }
+    [class*="st-key-kpis"] > [data-testid="stElementContainer"] { flex: 1 1 40%; padding-left: 0; }
+    [class*="st-key-kpis"] > [data-testid="stElementContainer"] + [data-testid="stElementContainer"] {
+      border-left: none; }
+  }
   [data-testid="stMetric"] { padding: 0 !important; border: none !important; background: none; }
   [data-testid="stMetricLabel"] p { font-size: 12px; color: var(--muted); }
   .st-key-kpis_ticket > [data-testid="stElementContainer"]:nth-child(2) { flex-grow: 2; }
+  .st-key-kpis_ticket [data-testid="stMetricValue"] { font-size: 16px; }
+  .st-key-kpis_ticket > [data-testid="stElementContainer"]:nth-child(3) { flex-grow: 1.4; }
+  [data-testid="stMetricValue"] * { overflow-wrap: normal; word-break: normal; hyphens: auto; }
   [data-testid="stMetricValue"] { font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
   [data-testid="stMetricValue"], [data-testid="stMetricValue"] * {
     white-space: normal !important; text-overflow: clip !important; overflow: visible !important; line-height: 28px;
@@ -107,11 +118,13 @@ _CSS = """
 
   /* Eingaben: weiß mit Linie (secondaryBackgroundColor), Textfeld mit ruhiger Zeilenhöhe */
   .stTextArea textarea { line-height: 22px; font-size: 14px; background: transparent; }
+  .stTextInput input { font-size: 14px; }
 
   /* Primär-Button: Tinte, im Dunkeln invertiert; Druck-Feedback statt Schatten */
   button[kind="primary"], button[kind="primaryFormSubmit"] { font-weight: 500; }
   button[kind="primary"], button[kind="primary"] *, button[kind="primaryFormSubmit"],
   button[kind="primaryFormSubmit"] * { color: light-dark(#ffffff, #0a0a0a) !important; }
+  button[kind="primary"]:disabled, button[kind="primary"]:disabled * { color: var(--muted) !important; }
   button { transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease; }
   button:active:not(:disabled) { transform: scale(0.97); }
   @media (prefers-reduced-motion: reduce) {
@@ -127,11 +140,80 @@ _CSS = """
   [data-testid="stDataFrame"] { border-radius: 6px; }
   [data-testid="stCode"] pre { font-size: 13px; line-height: 20px; max-height: 24rem; }
 
-  /* Seitenleiste auf dem Seitengrund, aktive Seite als graue Pille */
-  [data-testid="stSidebar"] { background: light-dark(#f2f4f7, #0a0a0a); }
-  [data-testid="stSidebarNavLink"] { border-radius: 6px; }
-  [data-testid="stSidebarNavLink"][aria-current="page"] { background: light-dark(#e6e8ec, #1f1f1f); }
+  /* Seitenleiste: Petrol-Schiene (Farben aus [theme.*.sidebar]), aktive Seite mit heller Marke links */
+  [data-testid="stSidebarNavLink"] { border-radius: 6px; position: relative;
+    transition: background-color 150ms ease; }
+  [data-testid="stSidebarNavLink"][aria-current="page"] { background: rgba(255, 255, 255, 0.10); }
+  [data-testid="stSidebarNavLink"][aria-current="page"]::before { content: ""; position: absolute; left: -8px;
+    top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: #a8dde4; }
+  @media (hover: hover) and (pointer: fine) {
+    [data-testid="stSidebarNavLink"]:hover { background: rgba(255, 255, 255, 0.06); }
+  }
   [data-testid="stSidebarUserContent"] { padding-top: 4px; }
+  [data-testid="stSidebarUserContent"] [data-testid="stCaptionContainer"] p { color: #a9c3c8; }
+  .st-key-side_who { border-top: 1px solid rgba(255, 255, 255, 0.10); padding-top: 12px; gap: 12px; }
+
+  /* Browser-Flächen im Ton der App: Auswahl, Fokus, Scrollbalken */
+  ::selection { background: light-dark(#cfe0fa, #1d3b66); }
+  .stApp :focus-visible { outline: 2px solid var(--hue); outline-offset: 2px; }
+  .stApp * { scrollbar-width: thin; scrollbar-color: light-dark(#c6cad0, #3a3a3a) transparent; }
+  [data-testid="stSidebarResizeHandle"] { background-image: none !important; }
+  [data-testid="stSidebar"] * { scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+
+  /* Übersicht: Kopf mit Aktion rechts */
+  .st-key-dash_head { gap: 12px; flex-wrap: nowrap; }
+  .st-key-dash_head > [data-testid="stLayoutWrapper"]:first-child { flex: 1 1 0; min-width: 0; width: auto; }
+
+  /* Streamlit zieht Markdown um 1rem nach oben; in dichten Listen und Haltestellen ohne Überlappung */
+  [class*="st-key-scroll"] [data-testid="stMarkdownContainer"],
+  [class*="st-key-scroll"] [data-testid="stCaptionContainer"],
+  [class*="st-key-stop_"] [data-testid="stMarkdownContainer"],
+  [class*="st-key-stop_"] [data-testid="stCaptionContainer"] { margin-bottom: 0; }
+  [class*="st-key-scroll"] [data-testid="stCaptionContainer"] p,
+  [class*="st-key-stop_"] [data-testid="stCaptionContainer"] p { margin-bottom: 0; }
+
+  /* Signatur: der Lebenszyklus als Linie mit Haltestellen. Gefüllt = dort liegen Tickets. */
+  .st-key-line { position: relative; gap: 0 !important; flex-wrap: nowrap; }
+  .st-key-line::before { content: ""; position: absolute; left: 6px; right: 0; top: 11px; height: 2px;
+    background: var(--line); }
+  .st-key-line > [data-testid="stLayoutWrapper"] { flex: 1 1 0; min-width: 0; }
+  [class*="st-key-stop_"] { position: relative; padding: 26px 8px 0 0; gap: 0 !important; }
+  [class*="st-key-stop_"]::before { content: ""; position: absolute; top: 5px; left: 0; width: 14px; height: 14px;
+    box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 2px solid var(--line); }
+  [class*="st-key-stop_on"]::before { background: var(--hue); border-color: var(--hue); }
+  [class*="st-key-stop_"] [data-testid="stMarkdownContainer"] p { font-size: 22px; line-height: 28px;
+    font-variant-numeric: tabular-nums; margin: 0; }
+  [class*="st-key-stop_off"] [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+  [class*="st-key-stop_"] [data-testid="stCaptionContainer"] p { font-size: 12px; line-height: 16px; }
+  @media (max-width: 760px) {
+    .st-key-line { flex-wrap: wrap; row-gap: 12px !important; }
+    .st-key-line::before { display: none; }
+    .st-key-line > [data-testid="stLayoutWrapper"] { flex: 1 1 30%; }
+  }
+
+  /* Ähnliche Treffer füllen die Spalte bis zur Unterkante der Vorgabemaske und scrollen darin */
+  .st-key-card_similar > [data-testid="stLayoutWrapper"]:has(> .st-key-scroll_similar) {
+    flex: 1 1 0; min-height: 200px; contain: size; }
+  .st-key-scroll_similar { height: 100% !important; }
+
+  /* Listen in Widgets fester Höhe: Haarlinie zwischen Zeilen, ruhiger Hover nur mit Maus */
+  [class*="st-key-scroll"] > [data-testid="stVerticalBlock"],
+  [class*="st-key-scroll"] { gap: 0 !important; }
+  [class*="st-key-scroll"] [data-testid="stElementContainer"],
+  [class*="st-key-bugrow"] { padding: 8px 6px; border-radius: 6px; transition: background-color 150ms ease; }
+  [class*="st-key-scroll"] > [data-testid="stElementContainer"] + [data-testid="stElementContainer"],
+  [class*="st-key-scroll"] > [data-testid="stLayoutWrapper"] + [data-testid="stLayoutWrapper"] {
+    border-top: 1px solid var(--rule); }
+  [class*="st-key-bugrow"] [data-testid="stElementContainer"] { padding: 0; }
+  [class*="st-key-scroll"] [data-testid="stMarkdownContainer"] p { margin: 0; line-height: 20px; }
+  .st-key-scroll_mine > [data-testid="stElementContainer"]:has(.stProgress) { padding-top: 0;
+    border-top: none !important; }
+  @media (hover: hover) and (pointer: fine) {
+    [class*="st-key-scroll"] > [data-testid="stElementContainer"]:hover,
+    [class*="st-key-bugrow"]:hover { background: light-dark(#f5f6f8, #171717); }
+  }
+  [class*="st-key-bugrow"] { flex-wrap: nowrap !important; }
+  [class*="st-key-bugrow"] > [data-testid="stElementContainer"]:first-child { flex: 1 1 0; min-width: 0; }
 </style>
 """
 

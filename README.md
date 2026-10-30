@@ -13,9 +13,10 @@ Läuft als **Streamlit-App auf Databricks Apps**. Lokal und ohne Firmennetz funk
 
 | Seite | Was sie tut |
 |---|---|
-| Ticket erstellen | Freitext → User Story mit Akzeptanzkriterien und Priorität; Stream-/Epic-Vorschlag mit Konfidenz; Multi-Stream-Stopp mit Aufteilungsvorschlag; ähnliche Tickets/Seiten; Export im Jira-Format |
+| Übersicht | Startseite: Kennzahlen, Lebenszyklus als Linie mit Anzahl je Phase, alle Pilot-Tickets, eigene Tickets, offene Tickets je Stream und Epic, offene Bugs (Absprung zur Ursache), zuletzt ausgerollte Changes, Anleitungen und Schulungen. Widgets fester Höhe, die in sich scrollen |
+| Ticket erstellen | Freitext → automatisch befüllte, editierbare Vorgabemaske (Titel, Rolle, Ziel, Nutzen, Akzeptanzkriterien, Hintergrund, Land, genau ein Stream, Epic, Priorität); Prioritätsprüfung („Ist das wirklich ein Blocker?“); neue Epics nur für INT; Multi-Stream-Stopp mit Aufteilungsvorschlag; ähnliche Tickets/Seiten auch bei anderer Formulierung, mit Link; Jira-Text und Anlage mit der angemeldeten Person als Autor (abgeschaltet, siehe unten) |
 | Meine Tickets | eigene Tickets aus Jira (nur lesen) mit Status und Fortschritt im Lebenszyklus |
-| Wissen abfragen | Fragen an Jira und Confluence, Antwort mit Quellen |
+| Wissen abfragen | Fragen an Jira, Confluence, Change Log, Anleitungen und Schulungsunterlagen, Antwort mit Quellen |
 | Bug-Ursache finden | ServiceNow-Bug → wahrscheinlich verursachender Change/Patch, beteiligte Personen, Konfidenz und Begründung |
 
 ## Lokal starten
@@ -61,14 +62,23 @@ Vertex AI mit einem OAuth-Token auf und nennt das Projekt im Header `x-goog-user
 Bugs kommen aus der ServiceNow-Tabelle `incident`, Changes/Patches aus `change_request`.
 
 **Jira-Schreiben ist abgeschaltet** (`REQPILOT_JIRA_WRITE_ENABLED=false`). Der Adapter existiert, der Knopf
-„In Jira anlegen“ bleibt deaktiviert, bis das bewusst freigegeben wird.
+„In Jira anlegen“ bleibt deaktiviert, bis das bewusst freigegeben wird. Ist es freigegeben, legt die App das
+Ticket mit der angemeldeten Person als `reporter` an (E-Mail aus dem Databricks-Login), mit Priorität, Labels
+für Land und Stream und dem Epic-Link (`jira.epic_link_field` in `config/settings.yaml`). Tickets, die mehrere
+Streams betreffen, werden nicht angelegt.
+
+Change Log, Anleitungen und Schulungsunterlagen liest die App als Markdown-Dateien aus `REQPILOT_DOCS_DIR`
+(lokal `fixtures/docs`). Jede Datei hat einen kurzen Kopf mit `title`, `kind` (`changelog`, `guide`,
+`training`) und optional `url`. Die Inhalte fließen in die Duplikatprüfung und in „Wissen abfragen“ ein.
 
 ## Streams pflegen
 
 Streams stehen in [`config/streams.yaml`](config/streams.yaml). Pilot: 4 ADF-Streams (Namen sind Platzhalter).
 Neuer Stream (bis zu 18): Eintrag kopieren, `id`, `name`, `description`, `keywords`, `epics` anpassen,
-`enabled: true`. Kein Code nötig. Prioritäten, Lebenszyklus, Länder und Schwellwerte stehen in
-[`config/settings.yaml`](config/settings.yaml).
+`enabled: true`. Kein Code nötig. Prioritäten, Lebenszyklus, Länder, Rollen und Schwellwerte stehen in
+[`config/settings.yaml`](config/settings.yaml). Rollen: `INT` darf neue Epics vorschlagen, `Land` ordnet
+bestehenden Epics zu; die Zuordnung E-Mail → Rolle steht unter `user_roles`, alle anderen bekommen
+`default_role`.
 
 ## Aufbau
 
@@ -110,6 +120,8 @@ Gemini-Antworten, rechtliche Bewertung der Ursachenanalyse (Personenbezug).
 - Quelle für Patch-/Release-Daten bestätigen (angenommen: ServiceNow `change_request`).
 - Schwellwerte mit echten Daten nachjustieren.
 - Lizenz für das Repository festlegen.
+- Rollenliste (wer ist INT) und Jira-Feld für den Epic-Link der Zielinstanz; Zuordnung E-Mail → Jira-Benutzername.
+- Exportweg für Change Log, Anleitungen und Schulungsunterlagen in den Dokumente-Ordner.
 
 ## Markenhinweis
 

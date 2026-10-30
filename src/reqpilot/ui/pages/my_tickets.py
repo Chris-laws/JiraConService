@@ -9,7 +9,7 @@ import streamlit as st
 from reqpilot.adapters.errors import SourceUnavailable
 from reqpilot.ui.components import kpi_strip, page_header
 from reqpilot.ui.i18n import t
-from reqpilot.ui.state import get_container, header_user
+from reqpilot.ui.state import current_user, display_name, get_container, header_user
 
 c = get_container()
 FILTERS = ("all", "open", "done", "rejected")
@@ -24,11 +24,19 @@ choice = toolbar.segmented_control(
 
 user = header_user()
 if user:
-    toolbar.markdown(t("mine.signed_in", user=user))
+    toolbar.markdown(t("mine.signed_in", user=display_name(user)))
 else:
     reporters = c.jira.reporters() if hasattr(c.jira, "reporters") else []
     if reporters:
-        user = toolbar.selectbox(t("mine.pick_user"), reporters, help=t("mine.pick_user_help"), width=320)
+        preset = current_user()
+        user = toolbar.selectbox(
+            t("mine.pick_user"),
+            reporters,
+            index=reporters.index(preset) if preset in reporters else 0,
+            format_func=display_name,
+            help=t("mine.pick_user_help"),
+            width=320,
+        )
     else:
         user = toolbar.text_input(t("mine.email"), help=t("mine.email_help"), width=320)
 

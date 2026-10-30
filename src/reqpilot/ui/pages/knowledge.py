@@ -60,7 +60,8 @@ else:
                         st.caption(turn["notice"])
                     st.markdown(turn["answer"])
                     for n, (title, url, source) in enumerate(turn["sources"], 1):
-                        st.caption(t("knowledge.source_row", n=n, title=title, url=url, source=source))
+                        label = t(f"source.{source}")
+                        st.caption(t("knowledge.source_row", n=n, title=title, url=url, source=label))
         typed = st.chat_input(t("knowledge.placeholder"))
 
 pending = st.session_state.pop("knowledge_pending", None)

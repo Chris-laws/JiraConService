@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from reqpilot.models import Bug, Change, Issue, Page
+from reqpilot.models import Bug, Change, Document, Issue, Page
 
 
 class JiraReader(Protocol):
@@ -20,6 +20,10 @@ class JiraWriter(Protocol):
 
 class ConfluenceReader(Protocol):
     def pages(self) -> list[Page]: ...
+
+
+class DocumentSource(Protocol):
+    def documents(self) -> list[Document]: ...
 
 
 class ServiceNowReader(Protocol):

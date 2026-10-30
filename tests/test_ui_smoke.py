@@ -17,7 +17,7 @@ def test_app_entry_renders():
     assert at.sidebar.caption[0].value == "Pilot ADF · Anforderungen im Standard"
 
 
-@pytest.mark.parametrize("name", ["ticket", "my_tickets", "knowledge", "rca"])
+@pytest.mark.parametrize("name", ["dashboard", "ticket", "my_tickets", "knowledge", "rca"])
 def test_each_page_renders(name):
     at = _page(name).run()
     assert not at.exception
@@ -128,3 +128,52 @@ def test_knowledge_suggestion_is_asked_once():
     assert len(at.chat_message) == 2
     at.run()
     assert len(at.chat_message) == 2
+
+
+MINDESTBESTAND = (
+    "Als Disponent möchte ich den Mindestbestand für Aktionsartikel überschreiben, damit die Filiale "
+    "zum Aktionsstart genug Ware hat. Die Änderung muss nach Aktionsende zurückgesetzt werden."
+)
+
+
+def test_dashboard_shows_lifecycle_line_and_scroll_widgets():
+    at = _page("dashboard").run()
+    assert not at.exception
+    assert [m.label for m in at.metric][0] == "Offen im Pilot"
+    stations = [c.value for c in at.caption if c.value in {"Neu", "Prüfung INT", "Backlog", "Erledigt"}]
+    assert len(stations) == 4
+    assert any(m.value.startswith("[INC") for m in at.markdown)
+    assert any("Schulung Wareneingang" in m.value for m in at.markdown)
+
+
+def _drafted(role: str | None = None) -> AppTest:
+    at = _page("ticket")
+    if role:
+        at.session_state["sb_role"] = role
+    at.run()
+    at.text_area[0].input(MINDESTBESTAND)
+    at.button[0].click().run()
+    assert not at.exception
+    return at
+
+
+def test_template_form_is_prefilled_and_feeds_markup():
+    at = _drafted()
+    assert at.text_input(key="f_role").value == "Disponent"
+    assert at.selectbox(key="f_stream").value == "disposition"
+    at.text_input(key="f_title").input("Mindestbestand für Aktionsware übersteuern").run()
+    assert "h2. Mindestbestand für Aktionsware übersteuern" in at.code[0].value
+    assert "Autor in Jira" in " ".join(m.value for m in at.markdown)
+
+
+def test_priority_check_questions_a_blocker():
+    at = _drafted()
+    at.selectbox(key="f_priority").select("Blocker").run()
+    assert any("Ist das wirklich Blocker" in w.value for w in at.warning)
+
+
+def test_only_int_may_propose_new_epic():
+    assert "Neues Epic vorschlagen" in _drafted("INT").selectbox(key="f_epic").options
+    land = _drafted("Land")
+    assert "Neues Epic vorschlagen" not in land.selectbox(key="f_epic").options
+    assert any("Neue Epics legt INT an" in c.value for c in land.caption)

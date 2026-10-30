@@ -15,6 +15,7 @@ class PageSpec:
 
 # Rolle "user" = jede Person mit Zugriff auf die Databricks-App.
 PAGES: tuple[PageSpec, ...] = (
+    PageSpec("dashboard", "nav.dashboard", ":material/space_dashboard:", ("user",)),
     PageSpec("ticket", "nav.ticket", ":material/edit_note:", ("user",)),
     PageSpec("my_tickets", "nav.my_tickets", ":material/assignment_ind:", ("user",)),
     PageSpec("knowledge", "nav.knowledge", ":material/travel_explore:", ("user",)),

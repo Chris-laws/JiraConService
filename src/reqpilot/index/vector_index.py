@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from reqpilot.adapters.base import ConfluenceReader, JiraReader
+from reqpilot.adapters.base import ConfluenceReader, DocumentSource, JiraReader
 from reqpilot.index.embedder import Embedder
 from reqpilot.models import SearchHit
 
@@ -65,7 +65,12 @@ class VectorIndex:
         return hits
 
 
-def build_knowledge_index(jira: JiraReader, confluence: ConfluenceReader, embedder: Embedder) -> VectorIndex:
+def build_knowledge_index(
+    jira: JiraReader,
+    confluence: ConfluenceReader,
+    embedder: Embedder,
+    documents: DocumentSource | None = None,
+) -> VectorIndex:
     index = VectorIndex(embedder)
     items = [
         IndexItem(
@@ -88,6 +93,10 @@ def build_knowledge_index(jira: JiraReader, confluence: ConfluenceReader, embedd
             payload={"space": p.space},
         )
         for p in confluence.pages()
+    ]
+    items += [
+        IndexItem(id=d.id, text=f"{d.title}. {d.body}", title=d.title, url=d.url, source=d.kind, payload={})
+        for d in (documents.documents() if documents else [])
     ]
     index.add(items)
     return index

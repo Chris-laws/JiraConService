@@ -38,7 +38,7 @@ def _session(json_data=None, status=200, exc=None, bad_json=False):
 
 def test_mock_readers_load_fixtures():
     jira = MockJira(FIX)
-    assert len(jira.search_issues()) == 10
+    assert len(jira.search_issues()) == 22
     assert all(i.reporter == "anna.berger@example.com" for i in jira.issues_by_reporter("anna.berger@example.com"))
     assert jira.search_issues()[0].url.endswith("/browse/ADF-1012")
     assert MockConfluence(FIX).pages()[0].title

@@ -1,4 +1,5 @@
-# Design-Tokens im Stil "Achromatic ledger": Chrome in Tinte, Farbe nur auf Daten. Doku: docs/DESIGN.md.
+# Design-Tokens "Ledger mit Petrol-Leiste": Arbeitsfläche in Tinte auf Blaugrau, die Seitenleiste als feste
+# Petrol-Schiene (Shell-Farbe), Blau nur auf Daten. Doku: docs/DESIGN.md.
 # Kontrast hell und dunkel prüft der Guard (dev/checks/ui.py). Fällt Google Fonts im Firmennetz aus,
 # greift die Systemschrift.
 
@@ -25,6 +26,23 @@ secondaryBackgroundColor = "#141414"
 textColor = "#fafafa"
 borderColor = "#2a2a2a"
 linkColor = "#7fb0ff"
+
+# Seitenleiste: in hell und dunkel dieselbe Petrol-Schiene, damit die App einen festen Rahmen hat.
+[theme.light.sidebar]
+backgroundColor = "#0f3038"
+secondaryBackgroundColor = "#18414a"
+textColor = "#eaf2f3"
+borderColor = "#2c5a64"
+primaryColor = "#ffffff"
+linkColor = "#a8dde4"
+
+[theme.dark.sidebar]
+backgroundColor = "#0c2227"
+secondaryBackgroundColor = "#133038"
+textColor = "#e6eef0"
+borderColor = "#24474f"
+primaryColor = "#ffffff"
+linkColor = "#a8dde4"
 
 [client]
 toolbarMode = "minimal"

@@ -3,6 +3,20 @@
 priorities: [Blocker, High, Medium, Low]
 default_priority: Medium
 
+# Rollen: INT (zentrale Koordination) und Land. Nur Rollen in epic_create_roles dürfen neue Epics vorschlagen;
+# Länder ordnen ihre Tickets bestehenden Epics zu.
+roles: [INT, Land]
+default_role: Land
+epic_create_roles: [INT]
+# Zuordnung E-Mail → Rolle. Auf Databricks kommt die E-Mail aus dem Login (X-Forwarded-Email).
+user_roles:
+  anna.berger@example.com: INT
+
+# Ziel beim Anlegen in Jira. Das Epic-Link-Feld ist je Jira-Instanz ein anderes customfield.
+jira:
+  project: ADF
+  epic_link_field: customfield_10008
+
 # Ticket-Lebenszyklus (Reihenfolge = Phase)
 lifecycle:
   - NEW REQUIREMENT

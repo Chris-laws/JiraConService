@@ -38,6 +38,8 @@ class Settings:
     servicenow_token: str | None = None
     config_dir: Path = ROOT / "config"
     fixtures_dir: Path = ROOT / "fixtures"
+    # Change Log, Anleitungen, Schulungsunterlagen als Markdown-Export (auch im Live-Modus ein Ordner)
+    docs_dir: Path = ROOT / "fixtures" / "docs"
 
 
 def _opt(env: Mapping[str, str], key: str) -> str | None:
@@ -88,6 +90,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         confluence_pat=_opt(env, "CONFLUENCE_PAT"),
         servicenow_url=_opt(env, "SERVICENOW_URL"),
         servicenow_token=_opt(env, "SERVICENOW_TOKEN"),
+        docs_dir=Path(_opt(env, "REQPILOT_DOCS_DIR") or ROOT / "fixtures" / "docs"),
     )
     if llm == "gemini" and not settings.gemini_api_key:
         raise ConfigError("REQPILOT_LLM=gemini braucht GEMINI_API_KEY")

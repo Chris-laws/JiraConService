@@ -20,7 +20,7 @@ def card_title(title_key: str, caption_key: str | None = None, **kwargs) -> None
     """Kopfzeile einer Karte: Titel, optional eine Erklärung darunter."""
     st.markdown(f"**{t(title_key, **kwargs)}**")
     if caption_key:
-        st.caption(t(caption_key))
+        st.caption(t(caption_key, **kwargs))
 
 
 def kpi_strip(key: str, items: list[tuple[str, object, str | None]]) -> None:

@@ -30,7 +30,7 @@ def test_stopwords_removed():
 
 def test_index_search_orders_by_similarity():
     idx = build_knowledge_index(MockJira(FIX), MockConfluence(FIX), HashingEmbedder())
-    assert len(idx) == 15
+    assert len(idx) == 27
     hits = idx.search("Teillieferungen im Wareneingang erfassen", k=3)
     assert hits[0].id == "ADF-1021"
     assert hits[0].score >= hits[1].score

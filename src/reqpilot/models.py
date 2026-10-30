@@ -65,6 +65,17 @@ class Bug:
 
 
 @dataclass(frozen=True)
+class Document:
+    """Change Log, Anleitung oder Schulungsunterlage."""
+
+    id: str
+    title: str
+    body: str
+    kind: str  # changelog | guide | training
+    url: str = ""
+
+
+@dataclass(frozen=True)
 class Change:
     id: str
     title: str

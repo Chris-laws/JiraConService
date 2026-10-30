@@ -12,7 +12,7 @@ def test_mock_container_wires_all_services():
     c = build_container(load_settings({}))
     assert isinstance(c.embedder, HashingEmbedder)
     assert c.thresholds == c.app_config.thresholds("hashing")
-    assert len(c.index) == 15
+    assert len(c.index) == 30
     draft = c.ticket_writer.draft("Als Disponent möchte ich Bestellvorschläge prüfen, damit Fehler auffallen.", "DE")
     assert c.classifier.classify(draft.as_text()).suggestions
     assert c.rca.analyze(c.servicenow.bugs()[0]).candidates
