@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
-from reqpilot.ui.components import page_header
+from reqpilot.ui.components import card_title, page_header
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container, header_user
 
@@ -12,17 +12,20 @@ c = get_container()
 FILTERS = ("all", "open", "done", "rejected")
 
 page_header("mine")
+side, main = st.columns([3, 9], gap="medium")
+user_card = side.container(key="card_user")
 
 user = header_user()
-top_left, top_right = st.columns([3, 1], vertical_alignment="bottom")
-if user:
-    top_left.markdown(t("mine.signed_in", user=user))
-else:
-    reporters = c.jira.reporters() if hasattr(c.jira, "reporters") else []
-    if reporters:
-        user = top_left.selectbox(t("mine.pick_user"), reporters, help=t("mine.pick_user_help"))
+with user_card:
+    card_title("mine.who", "mine.readonly")
+    if user:
+        st.markdown(t("mine.signed_in", user=user))
     else:
-        user = top_left.text_input(t("mine.email"), help=t("mine.email_help"))
+        reporters = c.jira.reporters() if hasattr(c.jira, "reporters") else []
+        if reporters:
+            user = st.selectbox(t("mine.pick_user"), reporters, help=t("mine.pick_user_help"))
+        else:
+            user = st.text_input(t("mine.email"), help=t("mine.email_help"))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -30,17 +33,17 @@ def _load(email: str):
     return c.my_tickets.for_user(email)
 
 
-if top_right.button(t("mine.refresh"), icon=":material/refresh:", width="stretch"):
+if user_card.button(t("mine.refresh"), icon=":material/refresh:", width="stretch"):
     _load.clear()
 
 try:
     rows = _load(user or "")
 except SourceUnavailable as exc:
-    st.error(t("error.source", detail=str(exc)))
+    main.error(t("error.source", detail=str(exc)))
     st.stop()
 
 if not rows:
-    st.info(t("mine.empty"), icon=":material/inbox:")
+    main.info(t("mine.empty"), icon=":material/inbox:")
     st.stop()
 
 
@@ -51,13 +54,14 @@ def _bucket(row) -> str:
 
 
 counts = {f: sum(_bucket(r) == f for r in rows) for f in FILTERS[1:]}
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4 = main.columns(4)
 m1.metric(t("mine.total"), len(rows), border=True)
 m2.metric(t("mine.open"), counts["open"], border=True)
 m3.metric(t("mine.done"), counts["done"], border=True)
 m4.metric(t("mine.rejected"), counts["rejected"], border=True)
 
-choice = st.segmented_control(
+table_card = main.container(key="card_table")
+choice = table_card.segmented_control(
     t("mine.filter"), FILTERS, default="all", format_func=lambda f: t(f"mine.filter_{f}"), help=t("mine.filter_help")
 )
 visible = [r for r in rows if choice in (None, "all") or _bucket(r) == choice]
@@ -76,9 +80,9 @@ table = pd.DataFrame(
     ]
 )
 if table.empty:
-    st.caption(t("mine.filter_empty"))
+    table_card.caption(t("mine.filter_empty"))
 else:
-    st.dataframe(
+    table_card.dataframe(
         table,
         hide_index=True,
         width="stretch",
@@ -88,4 +92,3 @@ else:
             t("mine.col_updated"): st.column_config.DatetimeColumn(format="DD.MM.YYYY HH:mm"),
         },
     )
-st.caption(t("mine.readonly"))

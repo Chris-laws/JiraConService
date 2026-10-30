@@ -112,6 +112,13 @@ def contrast() -> Result:
             ratio = contrast_ratio(fg, bg)
             if ratio < minimum:
                 details.append(f"{mode} {label}: {ratio:.2f} < {minimum}")
+    from reqpilot.ui.theme import HERO_COLORS
+
+    for color in HERO_COLORS:  # weiße Schrift im Hero-Band, in beiden Modi gleich
+        count += 1
+        ratio = contrast_ratio("#ffffff", color)
+        if ratio < AA:
+            details.append(f"Hero-Text/Verlauf {color}: {ratio:.2f} < {AA}")
     return Result(not details, details or [f"{count} Farbpaare in hell und dunkel erfüllen WCAG AA"])
 
 

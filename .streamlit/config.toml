@@ -4,6 +4,7 @@
 [theme]
 font = "sans-serif"
 baseRadius = "0.5rem"
+baseFontSize = 15
 showWidgetBorder = true
 showSidebarBorder = true
 

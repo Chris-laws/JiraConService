@@ -106,3 +106,24 @@ def test_rca_page_survives_unreachable_index(monkeypatch):
         assert at.error
     finally:
         get_container.clear()
+
+
+def test_ticket_shows_empty_state_before_submit():
+    at = _page("ticket").run()
+    assert any(m.value.startswith("### Hier erscheint") for m in at.markdown)
+    assert not at.code
+
+
+def test_rca_explains_signals_before_analysis():
+    at = _page("rca").run()
+    assert not at.subheader
+    assert any("Zeitliche Nähe" in m.value for m in at.markdown)
+
+
+def test_knowledge_suggestion_is_asked_once():
+    at = _page("knowledge").run()
+    at.button_group[0].set_value("knowledge.suggest_1").run()
+    assert not at.exception
+    assert len(at.chat_message) == 2
+    at.run()
+    assert len(at.chat_message) == 2

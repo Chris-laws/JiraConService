@@ -1,9 +1,9 @@
-"""Wissensabfrage über Jira und Confluence, als Chat."""
+"""Wissensabfrage über Jira und Confluence, als Chat. Links das Gespräch, rechts Vorschläge."""
 
 import streamlit as st
 
 from reqpilot.adapters.errors import SourceUnavailable
-from reqpilot.ui.components import page_header
+from reqpilot.ui.components import card_title, page_header
 from reqpilot.ui.i18n import t
 from reqpilot.ui.state import get_container
 
@@ -13,25 +13,48 @@ SUGGESTIONS = ("knowledge.suggest_1", "knowledge.suggest_2", "knowledge.suggest_
 page_header("knowledge")
 history: list[dict] = st.session_state.setdefault("knowledge_history", [])
 
-if not history:
-    picked = st.pills(t("knowledge.suggestions"), SUGGESTIONS, format_func=t, help=t("knowledge.help"))
-else:
-    picked = None
-    if st.button(t("knowledge.clear"), icon=":material/delete_sweep:"):
+
+def _take_suggestion() -> None:
+    """Vorschlag einmalig übernehmen und die Auswahl zurücksetzen, sonst würde er bei jedem Rerun neu gefragt."""
+    st.session_state["knowledge_pending"] = st.session_state.get("knowledge_pick")
+    st.session_state["knowledge_pick"] = None
+
+
+chat_col, side = st.columns([8, 4], gap="medium")
+
+with side, st.container(key="card_suggest"):
+    card_title("knowledge.suggestions", "knowledge.help")
+    st.pills(
+        t("knowledge.suggestions_label"),
+        SUGGESTIONS,
+        format_func=t,
+        key="knowledge_pick",
+        on_change=_take_suggestion,
+        help=t("knowledge.help"),
+    )
+    st.caption(t("knowledge.sources_hint"))
+    if history and st.button(t("knowledge.clear"), icon=":material/delete_sweep:", width="stretch"):
         history.clear()
         st.rerun()
 
-for turn in history:
-    with st.chat_message("user", avatar=":material/person:"):
-        st.markdown(turn["question"])
-    with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-        if turn.get("notice"):
-            st.caption(turn["notice"])
-        st.markdown(turn["answer"])
-        for n, (title, url, source) in enumerate(turn["sources"], 1):
-            st.caption(t("knowledge.source_row", n=n, title=title, url=url, source=source))
+with chat_col:
+    with st.container(key="card_chat", height=520, border=False):
+        if not history:
+            st.markdown(f"### {t('knowledge.empty_title')}")
+            st.caption(t("knowledge.empty_text"))
+        for turn in history:
+            with st.chat_message("user", avatar=":material/person:"):
+                st.markdown(turn["question"])
+            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+                if turn.get("notice"):
+                    st.caption(turn["notice"])
+                st.markdown(turn["answer"])
+                for n, (title, url, source) in enumerate(turn["sources"], 1):
+                    st.caption(t("knowledge.source_row", n=n, title=title, url=url, source=source))
+    typed = st.chat_input(t("knowledge.placeholder"))
 
-question = st.chat_input(t("knowledge.placeholder")) or (t(picked) if picked else None)
+pending = st.session_state.pop("knowledge_pending", None)
+question = typed or (t(pending) if pending else None)
 if question and question.strip():
     try:
         with st.spinner(t("knowledge.working")):
