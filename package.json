@@ -1,5 +1,5 @@
 {
-  "name": "lidlalign",
+  "name": "reqpilot",
   "private": true,
   "description": "Guard-Einstieg für den Python-Prototyp (npm run guard ruft python -m dev.guard)",
   "scripts": {

@@ -1,14 +1,14 @@
-# LidlALign – Design-Spec (Prototyp)
+# ReqPilot – Design-Spec (Prototyp)
 
 Stand: 2026-10-27 · Status: abgestimmt mit Chris im Projekt-Thread
 
 ## 1. Ziel und Kontext
 
-Länder und Teams im ADF-Umfeld (AD Fusion) schreiben Anforderungs-Tickets uneinheitlich. Das erschwert das
-Anforderungsmanagement (siehe „Anforderungsmanagement 1.pdf“): unterschiedliches Wording, Multi-Stream-Tickets,
+Länder und Teams im ADF-Umfeld schreiben Anforderungs-Tickets uneinheitlich. Das erschwert das
+Anforderungsmanagement (siehe interne Präsentation zum Anforderungsmanagement): unterschiedliches Wording, Multi-Stream-Tickets,
 Duplikate, fehlende Epic-Zuordnung. Zusätzlich ist bei ServiceNow-Bugs unklar, welcher Patch sie verursacht hat.
 
-LidlALign ist ein **Prototyp** für Business-User (zuerst INT und Dispomanagement, später die Länder). Er wird
+ReqPilot ist ein **Prototyp** für Business-User (zuerst INT und Dispomanagement, später die Länder). Er wird
 nach dem PoC an einen IT-Dienstleister übergeben. Deshalb: einfache deutsche Oberfläche, sauberer Python-Code,
 austauschbare Adapter, keine Betriebs- oder SSO-Eigenbauten.
 
@@ -23,7 +23,7 @@ austauschbare Adapter, keine Betriebs- oder SSO-Eigenbauten.
 
 ### Nicht-Ziele (Prototyp)
 
-- Kein Schreiben nach Jira. Ein Schreib-Adapter existiert, ist aber per Schalter aus (`LIDLALIGN_JIRA_WRITE_ENABLED=false`) und in der UI nicht erreichbar.
+- Kein Schreiben nach Jira. Ein Schreib-Adapter existiert, ist aber per Schalter aus (`REQPILOT_JIRA_WRITE_ENABLED=false`) und in der UI nicht erreichbar.
 - Keine eigene Benutzerverwaltung; Anmeldung über Databricks Apps (Workspace-SSO).
 - Kein Sprint-Performance-Dashboard, kein Scoring-Modell für Priorisierung (später).
 
@@ -35,9 +35,9 @@ austauschbare Adapter, keine Betriebs- oder SSO-Eigenbauten.
 - **Datenquellen:** Jira, Confluence, ServiceNow nur im Firmennetz. Bis PATs vorliegen: Fixtures in `fixtures/`.
 
 ```
-Streamlit-UI (src/lidlalign/ui)        ← nur Darstellung, Texte aus i18n
+Streamlit-UI (src/reqpilot/ui)        ← nur Darstellung, Texte aus i18n
         │
-Services (src/lidlalign/services)      ← fachliche Logik, kennt nur Protokolle
+Services (src/reqpilot/services)      ← fachliche Logik, kennt nur Protokolle
         │
 Adapter-Protokolle (adapters/base.py)  ← JiraReader, JiraWriter, ConfluenceReader,
         │                                 ServiceNowReader, ChangeSource, Llm, Embedder
@@ -45,7 +45,7 @@ Adapter-Protokolle (adapters/base.py)  ← JiraReader, JiraWriter, ConfluenceRea
  Mock (Fixtures)   Live (REST: Jira, Confluence, ServiceNow, Gemini)
 ```
 
-`container.py` baut anhand der Einstellungen (`LIDLALIGN_DATA_SOURCE=mock|live`, `LIDLALIGN_LLM=fake|gemini`)
+`container.py` baut anhand der Einstellungen (`REQPILOT_DATA_SOURCE=mock|live`, `REQPILOT_LLM=fake|gemini`)
 die passenden Adapter zusammen. Die UI bekommt nur den fertigen Container.
 
 ### Konfiguration

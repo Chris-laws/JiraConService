@@ -1,0 +1,61 @@
+# Design-Tokens "Ledger mit Petrol-Leiste": Arbeitsfläche in Tinte auf Blaugrau, die Seitenleiste als feste
+# Petrol-Schiene (Shell-Farbe), Blau nur auf Daten. Doku: docs/DESIGN.md.
+# Kontrast hell und dunkel prüft der Guard (dev/checks/ui.py). Fällt Google Fonts im Firmennetz aus,
+# greift die Systemschrift.
+
+[theme]
+font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap"
+codeFont = "Geist Mono:https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap"
+baseRadius = "6px"
+baseFontSize = 14
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#141414"             # Tinte: die eine Hauptaktion, keine Markenfarbe im Chrome
+backgroundColor = "#f2f4f7"          # Blaugrau, Grund aus der Ticket-/Ledger-Welt
+secondaryBackgroundColor = "#ffffff" # Eingaben bleiben weiß mit 1px Linie
+textColor = "#0a0a0a"
+borderColor = "#d4d6da"              # Bedienelemente eine Stufe kräftiger als Kartenlinien
+linkColor = "#1d5fbf"                # der eine Datenton
+# Diagramme: Datenton zuerst, dann Petrol, Bernstein, Schiefer (keine Lila-Töne)
+orangeTextColor = "#9a4a06"             # Badges "Prüfung": dunkler als Standard für AA-Kontrast
+greenTextColor = "#176b3a"
+chartCategoricalColors = ["#1d5fbf", "#0f8a8a", "#c98a1b", "#6b7a89", "#8fb3e8", "#7cc4c4"]
+
+[theme.dark]
+primaryColor = "#ededed"             # invertiert: helle Fläche, dunkle Schrift (theme.py)
+backgroundColor = "#0a0a0a"          # echtes Neutral, kein Navy
+secondaryBackgroundColor = "#141414"
+textColor = "#fafafa"
+borderColor = "#2a2a2a"
+linkColor = "#7fb0ff"
+orangeTextColor = "#f3c97a"
+greenTextColor = "#7ad49b"
+chartCategoricalColors = ["#7fb0ff", "#5fd0c8", "#f5b544", "#a3b1bf", "#3d6fb8", "#2c8f8a"]
+
+# Seitenleiste: in hell und dunkel dieselbe Petrol-Schiene, damit die App einen festen Rahmen hat.
+[theme.light.sidebar]
+backgroundColor = "#0f3038"
+secondaryBackgroundColor = "#18414a"
+textColor = "#eaf2f3"
+borderColor = "#2c5a64"
+primaryColor = "#ffffff"
+linkColor = "#a8dde4"
+
+[theme.dark.sidebar]
+backgroundColor = "#0c2227"
+secondaryBackgroundColor = "#133038"
+textColor = "#e6eef0"
+borderColor = "#24474f"
+primaryColor = "#ffffff"
+linkColor = "#a8dde4"
+
+[client]
+toolbarMode = "minimal"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

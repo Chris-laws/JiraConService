@@ -1,0 +1,49 @@
+# Fachliche Regeln aus dem Leitfaden Anforderungsmanagement
+
+priorities: [Blocker, High, Medium, Low]
+default_priority: Medium
+
+# Rollen: INT (zentrale Koordination) und Land. Nur Rollen in epic_create_roles dürfen neue Epics vorschlagen;
+# Länder ordnen ihre Tickets bestehenden Epics zu.
+roles: [INT, Land]
+default_role: Land
+epic_create_roles: [INT]
+# Zuordnung E-Mail → Rolle. Auf Databricks kommt die E-Mail aus dem Login (X-Forwarded-Email).
+user_roles:
+  anna.berger@example.com: INT
+
+# Ziel beim Anlegen in Jira. Das Epic-Link-Feld ist je Jira-Instanz ein anderes customfield.
+jira:
+  project: ADF
+  epic_link_field: customfield_10008
+
+# Ticket-Lebenszyklus (Reihenfolge = Phase)
+lifecycle:
+  - NEW REQUIREMENT
+  - VALIDATION INT
+  - ON HOLD DM
+  - VALIDATION TEAM
+  - ON HOLD
+  - DEVELOPMENT BACKLOG
+  - SELECTED FOR DEVELOPMENT
+  - READY FOR DEPLOYMENT
+  - DONE
+  - REJECTED
+
+# Schwellwerte je Embedder (Kosinus-Ähnlichkeit). Gemini-Embeddings liegen höher als der Offline-Hashing-Embedder.
+thresholds:
+  default:
+    duplicate: 0.85
+    similar: 0.70
+    multi_stream_ratio: 0.85
+    multi_stream_min: 0.60
+    stream_temperature: 0.05
+  hashing:
+    duplicate: 0.55
+    similar: 0.25
+    multi_stream_ratio: 0.80
+    multi_stream_min: 0.12
+    stream_temperature: 0.03
+
+# Länder für die Ticket-Erfassung
+countries: [DE, AT, BE, BG, CH, CY, CZ, DK, EE, ES, FI, FR, GB, GR, HR, HU, IE, IT, LT, LU, LV, MT, NL, PL, PT, RO, RS, SE, SI, SK]

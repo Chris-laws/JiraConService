@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-label="ReqPilot">
+  <style>.ink{fill:#141414}.paper{stroke:#ffffff}@media (prefers-color-scheme: dark){.ink{fill:#f2f2f2}.paper{stroke:#0a0a0a}}</style>
+  <path class="ink" d="M6 6h20a2 2 0 0 1 2 2v5a3 3 0 0 0 0 6v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-5a3 3 0 0 0 0-6V8a2 2 0 0 1 2-2z"/>
+  <path class="paper" d="M11 16.2l3.2 3.2L21 12.6" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
