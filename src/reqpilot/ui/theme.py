@@ -172,18 +172,29 @@ _CSS = """
   [class*="st-key-scroll"] [data-testid="stCaptionContainer"] p,
   [class*="st-key-stop_"] [data-testid="stCaptionContainer"] p { margin-bottom: 0; }
 
-  /* Signatur: der Lebenszyklus als Linie mit Haltestellen. Gefüllt = dort liegen Tickets. */
-  .st-key-line { position: relative; gap: 0 !important; flex-wrap: nowrap; }
-  .st-key-line::before { content: ""; position: absolute; left: 6px; right: 0; top: 11px; height: 2px;
-    background: var(--line); }
+  /* Signatur: der Lebenszyklus als Linie auf einer Petrol-Kachel (Farbe der Seitenleiste).
+     Hell = dort liegen Tickets, Bernstein = Engpass (offene Phase mit den meisten Tickets). */
+  .st-key-card_line { background: light-dark(#0f3038, #10292f); border-color: transparent; }
+  .st-key-card_line p, .st-key-card_line strong { color: #eaf2f3; }
+  .st-key-card_line [data-testid="stCaptionContainer"] p { color: #a9c3c8; }
+  .st-key-line { position: relative; gap: 0 !important; flex-wrap: nowrap; margin-top: 4px; }
+  .st-key-line::before { content: ""; position: absolute; left: 8px; right: 0; top: 13px; height: 2px;
+    background: rgba(255, 255, 255, 0.16); }
   .st-key-line > [data-testid="stLayoutWrapper"] { flex: 1 1 0; min-width: 0; }
-  [class*="st-key-stop_"] { position: relative; padding: 26px 8px 0 0; gap: 0 !important; }
-  [class*="st-key-stop_"]::before { content: ""; position: absolute; top: 5px; left: 0; width: 14px; height: 14px;
-    box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 2px solid var(--line); }
-  [class*="st-key-stop_on"]::before { background: var(--hue); border-color: var(--hue); }
-  [class*="st-key-stop_"] [data-testid="stMarkdownContainer"] p { font-size: 22px; line-height: 28px;
-    font-variant-numeric: tabular-nums; margin: 0; }
-  [class*="st-key-stop_off"] [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+  [class*="st-key-stop_"] { position: relative; padding: 34px 8px 0 0; gap: 2px !important; }
+  [class*="st-key-stop_"]::before { content: ""; position: absolute; top: 6px; left: 0; width: 16px; height: 16px;
+    box-sizing: border-box; border-radius: 50%; background: light-dark(#0f3038, #10292f);
+    border: 2px solid rgba(255, 255, 255, 0.30); }
+  [class*="st-key-stop_on"]::before { background: #a8dde4; border-color: #a8dde4; }
+  [class*="st-key-stop_peak"]::before { background: #f5b544; border-color: #f5b544;
+    outline: 4px solid rgba(245, 181, 68, 0.28); }
+  [class*="st-key-stop_"] [data-testid="stMarkdownContainer"] p { font-size: 30px; line-height: 36px;
+    font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin: 0; }
+  [class*="st-key-stop_off"] [data-testid="stMarkdownContainer"] p,
+  [class*="st-key-stop_off"] strong { color: rgba(234, 242, 243, 0.45); }
+  [class*="st-key-stop_peak"] strong { color: #f5b544; }
+  [class*="st-key-stop_peak"] [data-testid="stElementContainer"]:last-child [data-testid="stCaptionContainer"] p {
+    color: #f5b544; font-weight: 600; font-size: 12px; }
   [class*="st-key-stop_"] [data-testid="stCaptionContainer"] p { font-size: 12px; line-height: 16px; }
   @media (max-width: 760px) {
     .st-key-line { flex-wrap: wrap; row-gap: 12px !important; }

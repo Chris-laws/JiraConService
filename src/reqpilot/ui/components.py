@@ -23,11 +23,34 @@ def card_title(title_key: str, caption_key: str | None = None, **kwargs) -> None
         st.caption(t(caption_key, **kwargs))
 
 
-def kpi_strip(key: str, items: list[tuple[str, object, str | None]]) -> None:
-    """Kennzahlen als ein Streifen mit Haarlinien statt einzelner Kacheln: (Label, Wert, Hilfe)."""
+def kpi_strip(key: str, items: list[tuple]) -> None:
+    """Kennzahlen als ein Streifen mit Haarlinien statt einzelner Kacheln.
+
+    Jeder Eintrag: (Label, Wert, Hilfe) oder (Label, Wert, Hilfe, {delta, chart_data, …} für st.metric).
+    """
     with st.container(key=f"kpis_{key}", horizontal=True):
-        for label, value, help_text in items:
-            st.metric(label, value, help=help_text)
+        for label, value, help_text, *extra in items:
+            st.metric(label, value, help=help_text, **(extra[0] if extra else {}))
+
+
+# Phase → Badge-Farbe: Prüfung orange, Warten rot, Umsetzung blau, fertig grün, sonst grau
+_PHASE_COLORS = (
+    ("VALIDATION", "orange"),
+    ("ON HOLD", "red"),
+    ("BACKLOG", "blue"),
+    ("SELECTED", "blue"),
+    ("READY", "green"),
+    ("DONE", "green"),
+)
+
+
+def phase_color(status: str) -> str:
+    return next((color for prefix, color in _PHASE_COLORS if prefix in status.upper()), "gray")
+
+
+def priority_color(priority: str) -> str:
+    """ServiceNow-Priorität (z. B. "1 - Critical") → Badge-Farbe."""
+    return {"1": "red", "2": "orange"}.get(priority.strip()[:1], "gray")
 
 
 def confidence_level(confidence: float) -> str:

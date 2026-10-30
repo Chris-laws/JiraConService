@@ -142,6 +142,7 @@ def test_dashboard_shows_lifecycle_line_and_scroll_widgets():
     assert [m.label for m in at.metric][0] == "Offen im Pilot"
     stations = [c.value for c in at.caption if c.value in {"Neu", "Prüfung INT", "Backlog", "Erledigt"}]
     assert len(stations) == 4
+    assert sum(c.value == "Engpass" for c in at.caption) == 1
     assert any(m.value.startswith("[INC") for m in at.markdown)
     assert any("Schulung Wareneingang" in m.value for m in at.markdown)
 

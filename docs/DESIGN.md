@@ -40,10 +40,19 @@ Keine Verläufe, kein Lila/Indigo, keine Schatten auf ruhenden Flächen.
   beim Laden herein.
 - Browser-Flächen im Ton der App: Textauswahl hellblau, Fokusring 2 px im Datenton, schmale Scrollbalken.
 
+## Farbe mit Aufgabe
+
+- Phasen-Badges: Prüfung orange, Warten rot, Umsetzung blau, bereit/erledigt grün, neu grau
+  (`phase_color` in components.py). Bug-Priorität: kritisch rot, hoch orange.
+- Kennzahlen tragen einen Zusatz (z. B. „4 neu in 7 Tagen“) und einen Verlauf der letzten 14 Tage als
+  gleitende 7-Tage-Summe (`st.metric(chart_data=…)`). Rot nur bei kritischen Bugs.
+- Diagramme nutzen `chartCategoricalColors` aus config.toml: Datenton, Petrol, Bernstein, Schiefer.
+
 ## Signatur: der Lebenszyklus als Linie
 
-Auf der Übersicht steht der Jira-Workflow als Linie mit Haltestellen (eine je Phase, Zahl = Tickets dort).
-Gefüllte Haltestelle im Datenton = dort liegen Tickets, hohl = leer. Unter 760 px bricht die Linie in ein
+Auf der Übersicht steht der Jira-Workflow als Linie mit Haltestellen auf einer Petrol-Kachel in der Farbe der
+Seitenleiste (eine Haltestelle je Phase, Zahl = Tickets dort). Hellpetrol `#a8dde4` = dort liegen Tickets,
+hohl = leer, Bernstein `#f5b544` = Engpass (die offene Phase mit den meisten Tickets, nur eine). Unter 760 px bricht die Linie in ein
 Raster aus Haltestellen um. Container `key="line"`, Haltestellen `key="stop_on_<n>"` / `stop_off_<n>`.
 
 ## Seitenmuster
