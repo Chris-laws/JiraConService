@@ -278,7 +278,7 @@ ${c.epic ? '<p class="epic-filter-notice">Epic <strong class="mono">' + e(c.epic
 
 <section class="card card--flush" aria-label="Tickets">
   ${table}
-  ${c.matched > c.rows.length ? '<div class="table-more"><span class="num">1–' + e(c.rows.length) + ' von ' + e(c.matched) + '</span><a class="btn btn--secondary" href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase, epic: c.epic, limit: c.limit + 250 })) + '">Weitere 250 laden</a></div>' : ''}
+  ${c.matched > c.rows.length ? '<div class="table-more"><span class="num">1–' + e(c.rows.length) + ' von ' + e(c.matched) + '</span>' + (c.more > 0 ? '<a class="btn btn--secondary" href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase, epic: c.epic, limit: c.limit + c.page_size })) + '">Weitere ' + e(c.more) + ' laden</a>' : '<span>Suche oder Filter eingrenzen, um weitere zu sehen</span>') + '</div>' : ''}
 </section>
 </div>
 </div>`;

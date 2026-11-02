@@ -8,7 +8,8 @@
 // 3. Robustheit: kaputte Pfade, falsche Methoden, riesige und bösartige Eingaben. apiRequest muss immer gültiges
 //    JSON liefern und darf keinen Stacktrace und keine Tokens nach außen geben.
 //
-// Grenzen von Apps Script, gegen die geprüft wird: 6 Minuten je Ausführung (Web-App), 100 KB je Cache-Wert.
+// Grenzen von Apps Script, gegen die geprüft wird: 6 Minuten je Ausführung (Web-App), 100 KB je Cache-Wert,
+// 1.000 Cache-Einträge für alle Nutzer zusammen (darüber verdrängt der Cache die kurzlebigen zuerst).
 // Ziel für eine Seite: unter 30 Sekunden geschätzte Laufzeit, auch beim ersten Aufruf ohne Cache.
 'use strict';
 
@@ -151,8 +152,8 @@ function volume(n) {
     else if (second.est > PAGE_BUDGET_MS) fail(`${method} ${path}: mit Cache ${fmt(second.est)} (Ziel unter 30 s)`);
     if (second.sys > 0) fail(`${method} ${path}: zweiter Aufruf fragt Jira/Confluence/ServiceNow erneut (${second.sys}×), Cache greift nicht`);
   }
-  const raw = rt.__cache;
-  console.log(`   Cache: ${raw.size()} Einträge, alle unter 100 KB`);
+  console.log(`   Cache: ${rt.__cache.size()} von höchstens 1.000 Einträgen, alle unter 100 KB, ${cacheStats.evictions || 0} verdrängt`);
+  if (cacheStats.evictions) fail('Cache läuft über 1.000 Einträge, Listen werden verdrängt');
   return rt;
 }
 
@@ -205,14 +206,22 @@ function robustness() {
 }
 
 function vertexCache() {
-  console.log('\n## Vertex-Embeddings: erster Aufruf und Cache');
+  console.log('\n## Vertex-Embeddings: alle Texte einbetten, danach aus dem Cache');
   const log = [];
+  const cacheStats = { gets: 0, puts: 0 };
   const sys = makeSystems(2000, log);
-  const rt = createRuntime({ scriptProperties: Object.assign({}, LIVE, { EMBEDDINGS: 'vertex' }), fetch: sys.fetch, email: 'chris@firma.de' });
-  const a = measure(rt, log, 'GET', '/tickets', { q: 'Feiertag' });
-  const b = measure(rt, log, 'GET', '/tickets', { q: 'Feiertag' });
-  console.log(`   erster Aufruf: ${a.vx} Vertex-Aufrufe, geschätzt ${fmt(a.est)}; zweiter: ${b.vx} Vertex-Aufrufe, ${fmt(b.est)}`);
-  if (b.vx > 1) fail('Embeddings werden nicht aus dem Cache gelesen');
+  const rt = createRuntime({ scriptProperties: Object.assign({}, LIVE, { EMBEDDINGS: 'vertex' }), fetch: sys.fetch, email: 'chris@firma.de', cacheStats });
+  const params = { text: 'Der Bestellvorschlag soll Feiertage je Land berücksichtigen.' };
+  const a = measure(rt, log, 'POST', '/ticket', params);
+  const parallel = log.filter((c) => c.vertex && c.batch).length;
+  const b = measure(rt, log, 'POST', '/ticket', params);
+  console.log(`   erster Aufruf: ${a.vx} Vertex-Aufrufe (${parallel} davon parallel), geschätzt ${fmt(a.est)}`);
+  console.log(`   zweiter Aufruf: ${b.vx} Vertex-Aufrufe, ${b.sys} Systemaufrufe, ${fmt(b.est)}`);
+  console.log(`   Cache: ${rt.__cache.size()} Einträge, ${cacheStats.evictions || 0} verdrängt`);
+  if (a.vx < 40) fail('erster Aufruf bettet nicht alle Texte ein (' + a.vx + ' Vertex-Aufrufe)');
+  if (!parallel) fail('Embeddings laufen nicht parallel (fetchAll)');
+  if (b.vx > 1 || b.sys > 0) fail('zweiter Aufruf liest nicht aus dem Cache');
+  if (cacheStats.evictions) fail('Cache läuft über 1.000 Einträge, Einträge werden verdrängt');
 }
 
 console.log('Stresstest Apps-Script-Fassung' + (QUICK ? ' (kurz)' : ''));

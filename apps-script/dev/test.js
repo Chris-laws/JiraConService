@@ -157,6 +157,95 @@ test('Datenschutz: E-Mail und Telefonnummer werden vor der KI maskiert', () => {
   assert.strictEqual(rt.redact('Mail an max.muster@firma.de oder +49 30 1234567, Raum 12'), 'Mail an [E-Mail] oder [Telefon], Raum 12');
 });
 
+test('Fehlermeldungen von UrlFetch nennen keine Zugangsdaten', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const msg = rt.safeFetchMessage_(new Error('DNS error: https://nutzer:geheim1@jira.firma.de/rest?jql=x&token=geheim2 token=geheim3 Bearer geheim4\nzweite Zeile'));
+  assert.ok(!/geheim/.test(msg), msg);
+  assert.ok(/jira\.firma\.de\/rest/.test(msg), msg);
+  assert.ok(!/zweite Zeile/.test(msg));
+});
+
+test('Ticketliste: 250 Zeilen je Paket, „Weitere laden“ bis zur Obergrenze', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const base = rt.MOCK_DATA.issues.filter((i) => !String(i.key).startsWith('ADFCR'));
+  const many = [];
+  for (let n = 0; many.length < 600; n++) many.push(Object.assign({}, base[n % base.length], { key: 'ADF-' + (9000 + n), description: 'x'.repeat(500) }));
+  rt.MOCK_DATA.issues = rt.MOCK_DATA.issues.concat(many);
+  const first = call(rt, 'GET', '/tickets').ctx;
+  assert.strictEqual(first.rows.length, 250);
+  assert.ok(first.matched >= 600, String(first.matched));
+  assert.strictEqual(first.more, 250);
+  assert.ok(first.rows.every((r) => r.description.length <= 241), 'Beschreibung wird gekürzt');
+  const second = call(rt, 'GET', '/tickets', { limit: '500' }).ctx;
+  assert.strictEqual(second.rows.length, 500);
+  assert.strictEqual(second.more, Math.min(250, first.matched - 500));
+  const huge = call(rt, 'GET', '/tickets', { limit: '999999' }).ctx;
+  assert.strictEqual(huge.limit, 5000);
+  assert.strictEqual(huge.rows.length, first.matched);
+  assert.ok(huge.more <= 0);
+  assert.strictEqual(call(rt, 'GET', '/tickets', { limit: 'abc' }).ctx.rows.length, 250);
+});
+
+function fakeVertex(log, failFirst) {
+  let calls = 0;
+  return (url, req, batch) => {
+    calls++;
+    const inst = JSON.parse(req.payload).instances;
+    log.push({ n: inst.length, parallel: batch ? batch.parallel : 1 });
+    if (failFirst && failFirst(calls, inst)) return { code: failFirst.code || 500, text: '{}' };
+    return { code: 200, text: JSON.stringify({ predictions: inst.map((x) => {
+      const v = new Array(768).fill(0); const h = String(x.content).length; v[h % 768] = 1; v[(h * 7) % 768] += 0.5;
+      return { embeddings: { values: v } }; }) }) };
+  };
+}
+const texts = (n) => Array.from({ length: n }, (_, i) => 'Ticket Nummer ' + i + ' ' + 'x'.repeat(i % 50));
+
+test('Vertex-Embeddings: parallel, kompakt im Cache (wenige Einträge), zweiter Lauf ohne Aufruf', () => {
+  const log = [];
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, fetch: fakeVertex(log) });
+  const emb = new rt.VertexEmbedder('p', 'global', 'text-multilingual-embedding-002');
+  const a = emb.embed(texts(2000));
+  assert.strictEqual(log.length, 40);
+  assert.ok(log.some((l) => l.parallel > 1), 'fetchAll wird genutzt');
+  assert.ok(rt.__cache.size() <= 128, 'höchstens 128 Cache-Einträge, waren ' + rt.__cache.size());
+  log.length = 0;
+  const b = emb.embed(texts(2000));
+  assert.strictEqual(log.length, 0, 'zweiter Lauf aus dem Cache');
+  const dot = a[7].reduce((s, v, i) => s + v * b[7][i], 0);
+  assert.ok(Math.abs(dot - 1) < 1e-9, 'gleiche Vektoren aus Cache und Neuberechnung');
+});
+
+test('Vertex-Embeddings: Fehler in einem Paket behält die fertigen Vektoren, 429 wird einmal wiederholt', () => {
+  const log = [];
+  const fail = (calls, inst) => /Nummer 0 /.test(inst[0].content);
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, fetch: fakeVertex(log, fail) });
+  const emb = new rt.VertexEmbedder('p', 'global', 'm');
+  assert.throws(() => emb.embed(texts(300)), (e) => e instanceof rt.LlmUnavailable && /HTTP 500/.test(e.message));
+  log.length = 0;
+  const rt2 = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, fetch: fakeVertex(log), cache: rt.__cache });
+  new rt2.VertexEmbedder('p', 'global', 'm').embed(texts(300));
+  assert.strictEqual(log.length, 1, 'nur das fehlgeschlagene Paket wird neu geholt, waren ' + log.length);
+  const log3 = [];
+  let tries = 0;
+  const once429 = Object.assign(() => ++tries === 1, { code: 429 });
+  const rt3 = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, fetch: fakeVertex(log3, once429) });
+  assert.strictEqual(new rt3.VertexEmbedder('p', 'global', 'm').embed(texts(10)).length, 10);
+  assert.strictEqual(log3.length, 2);
+});
+
+test('Cache wie Apps Script: höchstens 1.000 Einträge, die kurzlebigen fliegen zuerst', () => {
+  const { memoryCache } = require('./runtime');
+  const c = memoryCache();
+  c.put('kurz', 'x', 300);
+  const lots = {}; for (let i = 0; i < 1000; i++) lots['lang' + i] = 'x';
+  c.putAll(lots, 21600);
+  assert.strictEqual(c.size(), 900);
+  assert.strictEqual(c.get('kurz'), null);
+  assert.throws(() => c.put('gross', 'ä'.repeat(60000)), /too large/);
+  c.advance(21601);
+  assert.strictEqual(c.get('lang1'), null);
+});
+
 test('Gebündelte Fassung (bundle/) ist aktuell und rechnet gleich', () => {
   const fs = require('fs');
   const path = require('path');

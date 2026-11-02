@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64
+import hashlib
 import re
 import shutil
 
@@ -11,9 +11,27 @@ from dev.checks.base import ROOT, Result, sh, tracked_files
 APPS = ROOT / "apps-script"
 NODE = shutil.which("node") or "node"
 
-# Firmen- und interne Namen, die im öffentlichen Repo nicht stehen dürfen (kodiert, damit sie hier selbst nicht stehen).
-_BRAND = base64.b64decode("bGlkbHxzY2h3YXJ6IGdydXBwZXxzY2h3YXJ6IGl0fGFkIGZ1c2lvbnxsaWRsZmxvdw==").decode()
-BRAND_RX = re.compile(r"(?i)\b(" + _BRAND + r")")
+# Firmen- und interne Namen, die im öffentlichen Repo nicht stehen dürfen. Hier stehen nur Hash-Präfixe
+# (SHA-256, 16 Zeichen) der kleingeschriebenen Wörter und Wortpaare, damit die Namen selbst nicht im Repo stehen.
+BRAND_HASHES = frozenset(
+    [
+        "501e824f2cad9398",
+        "5a0fd4feae0153d9",
+        "712739d2658cd5ca",
+        "8e1b664845300bb6",
+        "af8bbfd98fc72684",
+        "f3053000721117d7",
+    ]
+)
+WORD_RX = re.compile(r"[a-zäöüß0-9]+")
+
+
+def _brand_hits(line: str) -> bool:
+    words = WORD_RX.findall(line.lower())
+    grams = words + [a + " " + b for a, b in zip(words, words[1:], strict=False)]
+    return any(hashlib.sha256(g.encode()).hexdigest()[:16] in BRAND_HASHES for g in grams)
+
+
 TEXT = {".gs", ".html", ".js", ".json", ".md", ".py", ".yaml", ".yml", ".toml", ".txt", ".css", ".example"}
 
 
@@ -38,10 +56,10 @@ def ui() -> Result:
 def brand() -> Result:
     hits = []
     for path in tracked_files():
-        if path.suffix not in TEXT or path == ROOT / "dev" / "checks" / "appscript.py":
+        if path.suffix not in TEXT:
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
-            if BRAND_RX.search(line):
+            if _brand_hits(line):
                 hits.append(f"{path.relative_to(ROOT)}:{n}")
     return Result(not hits, hits[:20])
 

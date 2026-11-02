@@ -150,7 +150,33 @@ Jira-Daten werden 5 Minuten zwischengespeichert, Vektoren für die Ähnlichkeits
 node apps-script/dev/test.js          # Tests (Testdaten, Live-Adapter mit nachgebildeten Antworten, Vertex-Header)
 node apps-script/dev/server.js        # Vorschau mit Testdaten: http://127.0.0.1:8790/
 node apps-script/dev/bundle.js        # bundle/ nach Änderungen in src/ neu erzeugen
+node apps-script/dev/stress.js        # Stresstest: 500 bis 5.000 Tickets, Cache-Grenzen, Fuzzing (--quick: kürzer)
+node apps-script/dev/ui-check.js      # Browser-Prüfung: XSS, Kontrast, Schrift, A11y, Layout, Englisch (braucht Playwright)
+npm run guard                         # kompletter Guard (Python-Prototyp und Apps Script)
 ```
+
+Für eine interne Auslieferung mit anderem Standardnamen: `node apps-script/dev/bundle.js --out <ordner> --app-name <Name>`.
+Im Repo bleibt der neutrale Name.
+
+### Was der Stresstest zeigt
+
+Gemessen mit nachgebildeten Systemen und geschätzter Wartezeit je Aufruf (Jira/Confluence/ServiceNow 400 ms,
+Vertex 700 ms). Echte Laufzeiten hängen vom Netz ab und lassen sich nur im Apps-Script-Projekt messen.
+
+| Tickets | Übersicht, erster Aufruf | Ticketentwurf, erster Aufruf (alle Embeddings neu) | jede Seite mit Cache |
+|---|---|---|---|
+| 500 | etwa 1,5 s | etwa 6 s | etwa 1 s oder weniger |
+| 2.000 | etwa 3 s | etwa 13 s | etwa 1 s oder weniger |
+| 5.000 | etwa 5 s | etwa 26 s | etwa 1 s oder weniger |
+
+Apps Script rechnet langsamer als Node; die Rechenanteile können dort zwei- bis dreimal so lang dauern.
+
+Die Ticketliste schickt 250 Zeilen auf einmal („Weitere 250 laden“, höchstens 5.000).
+
+Der Script-Cache hält höchstens 1.000 Einträge für alle Nutzer zusammen und je Eintrag 100 KB. Die Listen aus
+Jira, Confluence und ServiceNow liegen in Teilen zu höchstens 96 KB, die Vektoren in 128 Fächern. Bei 5.000 Tickets
+sind das etwa 560 Einträge. Google kann Einträge trotzdem früher löschen; dann lädt bzw. rechnet die App neu
+(langsamer, aber korrekt). Im Cache liegen auch ServiceNow-Melder, nur serverseitig und höchstens 5 Minuten.
 
 Mit [clasp](https://github.com/google/clasp): `.clasp.json.example` nach `.clasp.json` kopieren, `scriptId`
 eintragen, dann im Ordner `apps-script/` `clasp push`. Dabei landen die Dateien aus `src/` einzeln im Projekt.

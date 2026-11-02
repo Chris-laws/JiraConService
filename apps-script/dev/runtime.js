@@ -19,21 +19,41 @@ function memoryProperties(initial) {
   };
 }
 
-// Grenzen wie in Apps Script: Schlüssel bis 250 Zeichen, Wert bis 100 KB (UTF-8-Bytes).
+// Grenzen wie in Apps Script: Schlüssel bis 250 Zeichen, Wert bis 100 KB (UTF-8-Bytes), höchstens 1.000 Einträge
+// für alle Nutzer zusammen. Wird es mehr, behält der Cache die 900 Einträge, die am längsten gültig sind
+// (Doku zu CacheService). Ablauf ohne Angabe: 600 s, höchstens 21.600 s.
 const CACHE_KEY_MAX = 250;
 const CACHE_VALUE_MAX = 100 * 1024;
+const CACHE_ITEMS_MAX = 1000;
+const CACHE_ITEMS_KEEP = 900;
 function memoryCache(stats) {
-  const store = new Map();
+  const store = new Map(); // key -> { value, expires }
+  let clock = 0; // Sekunden seit Start; Tests können vorstellen
   const check = (k, v) => {
     if (String(k).length > CACHE_KEY_MAX) throw new Error('Cache-Schlüssel zu lang: ' + String(k).length);
     if (Buffer.byteLength(String(v), 'utf8') > CACHE_VALUE_MAX) throw new Error('Argument too large: value');
   };
+  const live = (k) => { const e = store.get(k); if (e && e.expires <= clock) { store.delete(k); return null; } return e || null; };
+  const set = (k, v, seconds) => {
+    const ttl = Math.min(Math.max(seconds === undefined ? 600 : seconds, 1), 21600);
+    store.delete(k);
+    store.set(k, { value: String(v), expires: clock + ttl });
+  };
+  const trim = () => {
+    if (store.size <= CACHE_ITEMS_MAX) return;
+    if (stats) stats.evictions = (stats.evictions || 0) + store.size - CACHE_ITEMS_KEEP;
+    const keep = [...store.entries()].sort((a, b) => b[1].expires - a[1].expires).slice(0, CACHE_ITEMS_KEEP);
+    store.clear();
+    keep.forEach(([k, e]) => store.set(k, e));
+  };
   return {
-    get: (k) => { if (stats) stats.gets++; return store.has(k) ? store.get(k) : null; },
-    getAll: (keys) => { if (stats) stats.gets++; const out = {}; keys.forEach((k) => { if (store.has(k)) out[k] = store.get(k); }); return out; },
-    put: (k, v) => { check(k, v); if (stats) stats.puts++; store.set(k, String(v)); },
-    putAll: (obj) => { Object.keys(obj).forEach((k) => check(k, obj[k])); if (stats) stats.puts++; Object.keys(obj).forEach((k) => store.set(k, String(obj[k]))); },
+    get: (k) => { if (stats) stats.gets++; const e = live(k); return e ? e.value : null; },
+    getAll: (keys) => { if (stats) stats.gets++; const out = {}; keys.forEach((k) => { const e = live(k); if (e) out[k] = e.value; }); return out; },
+    put: (k, v, seconds) => { check(k, v); if (stats) stats.puts++; set(k, v, seconds); trim(); },
+    putAll: (obj, seconds) => { Object.keys(obj).forEach((k) => check(k, obj[k])); if (stats) stats.puts++; Object.keys(obj).forEach((k) => set(k, obj[k], seconds)); trim(); },
     size: () => store.size,
+    keys: () => [...store.keys()],
+    advance: (seconds) => { clock += seconds; },
   };
 }
 
@@ -82,8 +102,11 @@ function createRuntime(options) {
         const g = (t) => parts.find((p) => p.type === t).value;
         return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}:${g('second')}`;
       },
-      computeDigest: (alg, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()),
+      computeDigest: (alg, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map((b) => (b > 127 ? b - 256 : b)),
       base64EncodeWebSafe: (bytes) => Buffer.from(bytes.map((b) => (b + 256) % 256)).toString('base64url'),
+      base64Encode: (bytes) => Buffer.from(bytes.map((b) => (b + 256) % 256)).toString('base64'),
+      base64Decode: (text) => Array.from(Buffer.from(text, 'base64')).map((b) => (b > 127 ? b - 256 : b)),
+      sleep: () => {},
       DigestAlgorithm: { SHA_256: 'SHA_256' },
       Charset: { UTF_8: 'UTF_8' },
     },

@@ -1408,7 +1408,7 @@ body {
 @media (max-width: 640px) {
   .board-kpi > span, .board-kpi small, .board-ticket-row > small, .board-ticket-row .when { font-size: 11px; }
 }
-.status-legend-row { grid-template-columns: 7px minmax(0, 1fr) 20px 34px; }
+.status-legend-row { grid-template-columns: 7px minmax(0, 1fr) minmax(20px, max-content) minmax(34px, max-content); }
 
 /* Höchstens ein Großbuchstaben-Label je Seite: die Karten-Kicker in Satzschreibung */
 .development-kicker { text-transform: none; letter-spacing: 0; font-weight: 600; }

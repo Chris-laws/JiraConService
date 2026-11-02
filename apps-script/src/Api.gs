@@ -204,6 +204,8 @@ function ticketsPage_(req) {
     }),
     matched: matched.length,
     limit: limit,
+    page_size: TICKET_PAGE_,
+    more: Math.min(TICKET_PAGE_, matched.length - limit, 20 * TICKET_PAGE_ - limit),
     total: issues.length,
     error: r[1],
     scope: selected,

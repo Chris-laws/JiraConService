@@ -55,7 +55,12 @@ function requestJson(method, url, options) {
 /** Erste Zeile der Fehlermeldung, ohne Query-Teile von Adressen (dort könnten Tokens stehen). */
 function safeFetchMessage_(exc) {
   var msg = exc && exc.message ? String(exc.message).split('\n')[0] : 'Netzwerkfehler';
-  return msg.replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/g, '$1').replace(/([?&](token|key|access_token|pat|password)=)[^&\s"']*/gi, '$1…').slice(0, 300);
+  return msg
+    .replace(/(\/\/)[^\/@\s"']+@/g, '$1') // Zugangsdaten in Adressen (https://nutzer:passwort@host)
+    .replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/g, '$1') // Query-Teil
+    .replace(/\b((?:access_)?token|key|api_?key|pat|password|secret|sig)=[^&\s"']*/gi, '$1=…')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer …')
+    .slice(0, 300);
 }
 
 function bearer_(token, extra) {
@@ -437,10 +442,7 @@ CachedServiceNow.prototype.bugs = function () {
   var inner = this.inner;
   return cachedList_('sn:bugs', function () { return inner.bugs(); }, ['first_seen']);
 };
-CachedServiceNow.prototype.bug = function (number) {
-  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
-  return hit || this.inner.bug(number);
-};
+CachedServiceNow.prototype.bug = function (number) { return this.inner.bug(number); };
 CachedServiceNow.prototype.changes = function () {
   var inner = this.inner;
   return cachedList_('sn:changes', function () { return inner.changes(); }, ['deployed_at']);

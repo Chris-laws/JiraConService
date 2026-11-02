@@ -15,6 +15,9 @@ const arg = (name) => { const i = process.argv.indexOf('--' + name); return i > 
 const OUT = path.resolve(arg('out') || path.join(__dirname, '..', 'bundle'));
 const APP_NAME = arg('app-name');
 if (APP_NAME !== undefined && !/^[\p{L}\p{N} ._-]{1,40}$/u.test(APP_NAME)) throw new Error('--app-name: nur Buchstaben, Ziffern, Leerzeichen, . _ -');
+if (APP_NAME !== undefined && (!arg('out') || OUT === path.resolve(__dirname, '..', 'bundle'))) {
+  throw new Error('--app-name nur zusammen mit --out außerhalb von bundle/ (bundle/ im Repo behält den neutralen Namen)');
+}
 const named = (text) => (APP_NAME ? text.replace(/'ReqAlign'/g, JSON.stringify(APP_NAME).replace(/^"|"$/g, "'")) : text);
 fs.mkdirSync(OUT, { recursive: true });
 
