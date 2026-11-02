@@ -1,0 +1,145 @@
+<script>
+// Hilfsfunktionen für die Seitenvorlagen: Escaping, Übersetzung, Icons, Datums- und Statusanzeige.
+// Entsprechen den Jinja-Globals der bisherigen Web-App (t, icon, phase_label, short_date, …).
+
+var CTX = { lang: 'de' };
+
+/** HTML-sicher ausgeben (wie das automatische Escaping in Jinja). */
+function e(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Oberflächentexte: Deutsch in den Vorlagen, Englisch aus I18N_EN. */
+function t(text) {
+  if (text === null || text === undefined) return '';
+  return CTX.lang === 'en' && Object.prototype.hasOwnProperty.call(I18N_EN, text) ? I18N_EN[text] : text;
+}
+
+function icon(name, cls) {
+  return '<svg class="' + (cls || 'ic') + '" aria-hidden="true" focusable="false"><use href="#i-' + name + '"/></svg>';
+}
+
+/** Interner Link: Seitenwechsel ohne Neuladen. */
+function u(path) { return '#' + path; }
+
+/** Wie urlencode in Python: leere Werte fallen weg, Leerzeichen werden zu "+". */
+function query(params) {
+  var q = new URLSearchParams();
+  Object.keys(params).forEach(function (k) { if (params[k]) q.append(k, params[k]); });
+  return q.toString();
+}
+
+var PHASE_LABELS = {
+  'NEW REQUIREMENT': 'Neue Anforderung', 'VALIDATION INT': 'Prüfung INT', 'ON HOLD DM': 'Wartet auf DM',
+  'VALIDATION TEAM': 'Prüfung Team', 'ON HOLD': 'Zurückgestellt', 'DEVELOPMENT BACKLOG': 'Entwicklungs-Backlog',
+  'SELECTED FOR DEVELOPMENT': 'In Planung', 'READY FOR DEPLOYMENT': 'Bereit zum Rollout', 'DONE': 'Erledigt', 'REJECTED': 'Abgelehnt'
+};
+var WAITING = ['ON HOLD DM', 'ON HOLD'];
+var DOC_KINDS = { changelog: 'Change Log', guide: 'Anleitung', training: 'Schulung' };
+var SOURCE_LABELS = { jira: 'Jira', confluence: 'Confluence', changelog: 'Change Log', guide: 'Anleitung', training: 'Schulung' };
+var MONTHS = ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sep.', 'Okt.', 'Nov.', 'Dez.'];
+var WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+var WEEKDAYS_EN = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+var MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Zeitleiste in „Meine Tickets“: sechs Schritte
+var TRACK = ['Eingang', 'Validierung', 'Stream-Review', 'Backlog', 'Quartal', 'Done'];
+var NEXT_STEP = ['DM validiert dein Ticket.', 'DM ordnet es einem Stream zu.', 'Der Stream klärt offene Punkte.',
+  'Wartet auf die Quartalsplanung.', 'Ist fürs Quartal eingeplant und in Entwicklung.', 'Bereit für Deployment oder Test im Land.'];
+
+function upper(s) { return String(s || '').toUpperCase(); }
+
+function phase_label(status) {
+  var s = upper(status);
+  if (PHASE_LABELS[s]) return PHASE_LABELS[s];
+  status = String(status || '');
+  return status ? status.charAt(0).toUpperCase() + status.slice(1).toLowerCase() : '';
+}
+
+/** Ton der Status-Pille: erledigt, abgelehnt, wartend oder in Arbeit. */
+function phase_tone(status) {
+  var s = upper(status);
+  if (s === 'DONE') return 'positive';
+  if (s === 'REJECTED') return 'muted';
+  return WAITING.indexOf(s) >= 0 ? 'warning' : 'neutral';
+}
+
+function pill_tone(status) {
+  return { positive: 'ok', warning: 'wn', neutral: 'in' }[phase_tone(status)] || '';
+}
+
+/** Kurzname eines Streams ohne Zusatz in Klammern; unbekannte Streams zeigen ihre ID. */
+function stream_label(id) {
+  if (!id) return '–';
+  var name = CTX.stream_names && CTX.stream_names[id];
+  return name ? name.split(' (')[0] : id;
+}
+
+function source_label(s) { return SOURCE_LABELS[s] || s; }
+
+/** Zeiten kommen als ISO-Text (Wanduhr-Zeit, als UTC gespeichert). */
+function D(value) { return value instanceof Date ? value : new Date(value); }
+
+function short_date(value) { var d = D(value); return d.getUTCDate() + '. ' + MONTHS[d.getUTCMonth()]; }
+
+function long_date(value, lang) {
+  var d = D(value);
+  var wd = (d.getUTCDay() + 6) % 7;
+  if (lang === 'en') return WEEKDAYS_EN[wd] + ', ' + MONTHS_EN[d.getUTCMonth()] + ' ' + d.getUTCDate();
+  return WEEKDAYS[wd] + ', ' + short_date(d);
+}
+
+function day_number(d) { return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 86400000); }
+
+function relative_day(value) {
+  var days = day_number(D(CTX.now)) - day_number(D(value));
+  if (days <= 0) return 'Heute';
+  if (days === 1) return 'Gestern';
+  return days < 14 ? 'vor ' + days + ' Tagen' : short_date(value);
+}
+
+function two(n) { return (n < 10 ? '0' : '') + n; }
+
+function full_date_time(value) {
+  var d = D(value);
+  return two(d.getUTCDate()) + '.' + two(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() + ', ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+}
+
+/** Rundet wie Python round(): bei genau .5 zur geraden Zahl. */
+function py_round(value) {
+  var r = Math.round(value);
+  if (Math.abs(value % 1) === 0.5 && r % 2 !== 0) r -= 1;
+  return r;
+}
+
+function percent(value) { return py_round(Math.max(0, Math.min(1, value)) * 100); }
+
+/** '2 - High' → 'High'. */
+function priority_short(priority) {
+  return priority.indexOf('-') >= 0 ? priority.split('-').slice(1).join('-').trim() : priority;
+}
+
+function track_step(status) {
+  var s = upper(status);
+  if (s.indexOf('NEW') === 0) return 0;
+  if (s.indexOf('VALIDATION') === 0 || s === 'ON HOLD DM') return 1;
+  if (s.indexOf('ON HOLD') === 0) return 2;
+  if (s.indexOf('BACKLOG') >= 0) return 3;
+  if (s.indexOf('SELECTED') === 0) return 4;
+  return 5;
+}
+
+/** Wie der Jinja-Filter truncate (Länge, Wortgrenze, „...“). */
+function truncate(text, length) {
+  text = String(text || '');
+  if (text.length <= length + 5) return text;
+  var cut = text.slice(0, length - 3);
+  var space = cut.lastIndexOf(' ');
+  return (space >= 0 ? cut.slice(0, space) : cut) + '...';
+}
+
+function hue(id) { return (CTX.hues && CTX.hues[id]) || 'slate'; }
+
+function each(list, fn) { return (list || []).map(fn).join(''); }
+</script>

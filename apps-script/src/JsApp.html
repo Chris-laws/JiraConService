@@ -1,0 +1,411 @@
+<script>
+// Seitenwechsel, Formulare und Kleinigkeiten (Hell/Dunkel, Menü, Dialoge, Kopieren, Diagramm).
+// Seiten heißen wie in der bisherigen Web-App (#/tickets?scope=…). Jeder Wechsel fragt apiRequest() in Api.gs.
+
+(function () {
+  var root = document.documentElement;
+  var app = document.getElementById('app');
+  var progress = document.getElementById('route-progress');
+  var suppressHash = null;
+  var current = { path: '/', query: '' };
+
+  function store(key, value) { try { localStorage.setItem(key, value); } catch (err) { /* privat: egal */ } }
+  function read(key) { try { return localStorage.getItem(key); } catch (err) { return null; } }
+
+  // ------------------------------------------------------------ Server
+
+  function callServer(method, path, params) {
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (text) {
+          try { resolve(JSON.parse(text)); } catch (err) { reject(new Error('Antwort nicht lesbar.')); }
+        })
+        .withFailureHandler(function (err) { reject(err instanceof Error ? err : new Error(String(err))); })
+        .apiRequest(method, path, params);
+    });
+  }
+
+  function paramsFromQuery(qs) {
+    var out = {};
+    new URLSearchParams(qs || '').forEach(function (value, key) { (out[key] = out[key] || []).push(value); });
+    return out;
+  }
+
+  function paramsFromForm(form, submitter) {
+    var data;
+    try { data = new FormData(form, submitter || undefined); } catch (err) {
+      data = new FormData(form);
+      if (submitter && submitter.name) data.append(submitter.name, submitter.value);
+    }
+    var out = {};
+    data.forEach(function (value, key) { (out[key] = out[key] || []).push(String(value)); });
+    return out;
+  }
+
+  function splitPath(full) {
+    var i = full.indexOf('?');
+    return i < 0 ? { path: full || '/', query: '' } : { path: full.slice(0, i) || '/', query: full.slice(i + 1) };
+  }
+
+  // ------------------------------------------------------------ Seitenwechsel
+
+  var busy = 0;
+  function setBusy(on) {
+    busy += on ? 1 : -1;
+    progress.classList.toggle('is-active', busy > 0);
+    document.body.setAttribute('aria-busy', busy > 0 ? 'true' : 'false');
+  }
+
+  function hashPath() {
+    var h = decodeURI(location.hash.replace(/^#/, ''));
+    return h && h.charAt(0) === '/' ? h : '/';
+  }
+
+  /** Zu einem Pfad wechseln. Gleicher Pfad lädt die Seite neu (wie ein Klick im Browser). */
+  function navigate(full, anchor) {
+    if ('#' + full === location.hash || (full === '/' && !location.hash)) load('GET', full, null, anchor);
+    else { pendingAnchor = anchor || null; location.hash = full; }
+  }
+  var pendingAnchor = null;
+
+  window.addEventListener('hashchange', function () {
+    var full = hashPath();
+    if (suppressHash === full) { suppressHash = null; return; }
+    var anchor = pendingAnchor; pendingAnchor = null;
+    load('GET', full, null, anchor);
+  });
+
+  /** GET: Pfad mit Query. POST: Formularfelder als params. */
+  function load(method, full, params, anchor, opts) {
+    var p = splitPath(full);
+    opts = opts || {};
+    setBusy(true);
+    return callServer(method, p.path, method === 'GET' ? paramsFromQuery(p.query) : params).then(function (res) {
+      if (res.fatal) throw new Error(res.fatal);
+      if (res.redirect) { navigate(res.redirect); return; }
+      if (res.download) { download(res.download.name, res.download.text); return; }
+      if (res.template) {
+        // Nach dem Absenden bleibt die Adresse die der Seite (wie bisher /ticket bzw. /wissen).
+        var shown = method === 'GET' ? full : ({ ticket: '/ticket', knowledge: '/wissen' }[res.template] || p.path);
+        current = splitPath(shown);
+        res.ctx.query_string = current.query;
+        render(res.template, res.ctx, opts);
+        if (method !== 'GET' && hashPath() !== shown) { suppressHash = shown; location.hash = shown; }
+        if (anchor) { var a = document.getElementById(anchor); if (a) a.scrollIntoView(); }
+      }
+      return res;
+    }).catch(function (err) {
+      showFatal(err.message || String(err));
+      throw err;
+    }).finally(function () { setBusy(false); });
+  }
+
+  function showFatal(message) {
+    var box = document.getElementById('fatal');
+    box.querySelector('span').textContent = 'Das hat nicht geklappt: ' + message + ' Bitte erneut versuchen.';
+    box.hidden = false;
+    clearTimeout(showFatal.timer);
+    showFatal.timer = setTimeout(function () { box.hidden = true; }, 9000);
+  }
+
+  function render(template, ctx, opts) {
+    CTX = ctx;
+    root.lang = ctx.lang;
+    var fn = TEMPLATES[template] || TEMPLATES.notfound;
+    var oldMain = app.querySelector('main.sheet');
+    var scroll = opts.keepScroll && oldMain ? oldMain.scrollTop : 0;
+    app.innerHTML = fn(ctx);
+    document.title = (app.querySelector('.appbar-title') || {}).textContent + ' · ' + ctx.app_name;
+    applySidebarState();
+    var main = app.querySelector('main.sheet');
+    if (main) main.scrollTop = scroll;
+    window.scrollTo(0, 0);
+    app.querySelectorAll('.msgs').forEach(function (box) { box.scrollTop = box.scrollHeight; });
+    drawChart(ctx);
+    if (opts.focus) { var f = document.getElementById(opts.focus); if (f) f.focus({ preventScroll: true }); }
+  }
+
+  // Ticket-Erfassung braucht die volle Breite, unabhängig von der gespeicherten Seitenleiste.
+  function applySidebarState() {
+    var onTicket = current.path === '/ticket' || current.path.indexOf('/ticket/') === 0;
+    var collapsed = onTicket || read('sidebar-collapsed') === 'true';
+    root.classList.toggle('sidebar-collapsed', collapsed);
+    var toggle = document.querySelector('[data-sidebar-toggle]');
+    if (toggle) {
+      var label = collapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen';
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.setAttribute('aria-label', label);
+      toggle.setAttribute('title', label);
+    }
+  }
+
+  function download(name, text) {
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).catch(function () { return copyFallback(text); });
+    }
+    return Promise.resolve(copyFallback(text));
+  }
+  function copyFallback(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); } finally { area.remove(); }
+  }
+
+  // ------------------------------------------------------------ Klicks
+
+  document.addEventListener('click', function (event) {
+    var link = event.target.closest('a[href^="#/"]');
+    if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      event.preventDefault();
+      document.body.classList.remove('nav-open');
+      navigate(decodeURI(link.getAttribute('href').slice(1)), link.getAttribute('data-anchor'));
+      return;
+    }
+    if (event.target.closest('a[data-skip]')) {
+      event.preventDefault();
+      var main = document.getElementById('main');
+      if (main) main.focus();
+      return;
+    }
+    var el = event.target.closest('[data-theme-toggle],[data-dialog-open],[data-dialog-close],[data-nav-open],[data-nav-close],[data-sidebar-toggle],[data-copy],[data-rca-generate],[data-series]');
+    if (!el) return;
+    if (el.hasAttribute('data-theme-toggle')) {
+      root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+      store('theme', root.dataset.theme);
+    } else if (el.hasAttribute('data-sidebar-toggle')) {
+      var collapsed = !root.classList.contains('sidebar-collapsed');
+      store('sidebar-collapsed', String(collapsed));
+      root.classList.toggle('sidebar-collapsed', collapsed);
+      var label = collapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen';
+      el.setAttribute('aria-expanded', String(!collapsed));
+      el.setAttribute('aria-label', label);
+      el.setAttribute('title', label);
+    } else if (el.hasAttribute('data-dialog-open')) {
+      var dialog = document.getElementById(el.getAttribute('data-dialog-open'));
+      if (dialog) dialog.showModal();
+    } else if (el.hasAttribute('data-dialog-close')) {
+      el.closest('dialog').close();
+    } else if (el.hasAttribute('data-nav-open')) {
+      document.body.classList.add('nav-open');
+      el.setAttribute('aria-expanded', 'true');
+      var first = document.querySelector('.sidebar a, .sidebar input');
+      if (first) first.focus();
+    } else if (el.hasAttribute('data-nav-close')) {
+      document.body.classList.remove('nav-open');
+      var opener = document.querySelector('[data-nav-open]');
+      if (opener) { opener.setAttribute('aria-expanded', 'false'); opener.focus(); }
+    } else if (el.hasAttribute('data-copy')) {
+      var source = document.getElementById(el.getAttribute('data-copy'));
+      if (!source) return;
+      copyText(source.value || source.textContent).then(function () {
+        var span = el.querySelector('span');
+        if (!span) return;
+        var before = span.textContent;
+        span.textContent = 'Kopiert';
+        setTimeout(function () { span.textContent = before; }, 1600);
+      });
+    } else if (el.hasAttribute('data-rca-generate')) {
+      generateExplanation(el);
+    } else if (el.hasAttribute('data-series')) {
+      toggleSeries(el);
+    }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && document.body.classList.contains('nav-open')) {
+      document.querySelector('.scrim').click();
+    }
+    // "/" springt in die Ticketsuche
+    if (event.key === '/' && !event.target.closest('input, textarea, select')) {
+      var search = document.getElementById('top-q');
+      if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); }
+    }
+    // In Chat-Feldern schickt Enter ab, Umschalt+Enter macht eine neue Zeile
+    if (event.key === 'Enter' && !event.shiftKey && event.target.matches('[data-chat] textarea')) {
+      var form = event.target.closest('[data-chat]');
+      if (form) { event.preventDefault(); form.requestSubmit(); }
+    }
+  });
+
+  // Auswahl in Filterleisten schickt das Formular sofort ab
+  document.addEventListener('change', function (event) {
+    if (!event.target.matches('[data-autosubmit]')) return;
+    if (event.target.matches('select[name=scope]')) {
+      // Ein Epic aus dem vorherigen Stream darf keine Tickets im neuen verstecken.
+      var epic = event.target.form.querySelector('input[name="epic"]');
+      if (epic) epic.remove();
+    }
+    event.target.form.requestSubmit();
+  });
+
+  // ------------------------------------------------------------ Formulare
+
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    event.preventDefault();
+    var submitter = event.submitter;
+    var action = (submitter && submitter.getAttribute('formaction')) || form.getAttribute('action') || '/';
+    var method = ((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toUpperCase();
+
+    if (method === 'GET') {
+      var qs = new URLSearchParams();
+      new FormData(form).forEach(function (value, key) { qs.append(key, value); });
+      var s = qs.toString();
+      navigate(action + (s ? '?' + s : ''));
+      return;
+    }
+
+    var params = paramsFromForm(form, submitter);
+    // „Als Datei“ braucht keinen Server: der Jira-Text steht schon im Formular.
+    if (action === '/ticket/text') {
+      download('ticket.txt', (params.markup || [''])[params.markup ? params.markup.length - 1 : 0]);
+      return;
+    }
+    if (form.dataset.pending) return;
+    form.dataset.pending = 'true';
+    form.setAttribute('aria-busy', 'true');
+    var before = submitter && submitter.innerHTML;
+    var isTicket = action === '/ticket' || action === '/ticket/pruefen';
+    if (submitter) { submitter.disabled = true; if (isTicket && submitter.textContent.trim()) submitter.textContent = 'Wird geprüft …'; }
+    load('POST', action, params, null, { keepScroll: isTicket, focus: isTicket ? 't-text' : null })
+      .catch(function (err) {
+        var notice = form.querySelector('.request-error');
+        if (!notice) { notice = document.createElement('p'); notice.className = 'request-error'; notice.setAttribute('role', 'alert'); form.appendChild(notice); }
+        notice.textContent = (err.message || String(err)) + ' Deine Eingaben bleiben erhalten. Bitte erneut versuchen.';
+      })
+      .finally(function () {
+        if (!document.body.contains(form)) return;
+        delete form.dataset.pending;
+        form.removeAttribute('aria-busy');
+        if (submitter) { submitter.disabled = false; submitter.innerHTML = before; }
+      });
+  });
+
+  // ------------------------------------------------------------ Bug-Erklärung (nur auf Anfrage)
+
+  function generateExplanation(button) {
+    if (button.disabled) return;
+    var output = button.closest('dialog').querySelector('.rca-explanation-text');
+    var label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Erklärung wird erstellt …';
+    output.setAttribute('aria-busy', 'true');
+    callServer('POST', button.getAttribute('data-rca-generate'), {}).then(function (res) {
+      if (res.fatal) throw new Error(res.fatal);
+      var data = res.json || {};
+      if (res.status !== 200) throw new Error(data.error || 'Erklärung konnte nicht erstellt werden.');
+      output.textContent = (data.generated ? 'KI-Erklärung · anhand der verfügbaren Befunde\n\n' : '') + data.text;
+    }).catch(function (err) {
+      output.textContent = err.message;
+    }).finally(function () {
+      button.disabled = false;
+      button.textContent = label;
+      output.removeAttribute('aria-busy');
+    });
+  }
+
+  // ------------------------------------------------------------ Monatsverlauf (Übersicht)
+
+  var chartState = { active: { created: true, resolved: true }, series: [] };
+  var chartObserver = null;
+
+  function toggleSeries(button) {
+    var kind = button.getAttribute('data-series');
+    var active = chartState.active;
+    if (!(kind in active) || (active[kind] && !active[kind === 'created' ? 'resolved' : 'created'])) return;
+    active[kind] = !active[kind];
+    button.setAttribute('aria-pressed', active[kind] ? 'true' : 'false');
+    renderChart();
+  }
+
+  function drawChart(ctx) {
+    if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
+    var node = document.getElementById('year-chart');
+    if (!node) return;
+    chartState.active = { created: true, resolved: true };
+    chartState.series = Array.isArray(ctx.series) ? ctx.series.slice(0, 12) : [];
+    renderChart();
+    if (typeof ResizeObserver !== 'undefined') {
+      var lastWidth = node.clientWidth;
+      chartObserver = new ResizeObserver(function () {
+        if (Math.abs(node.clientWidth - lastWidth) < 1) return;
+        lastWidth = node.clientWidth;
+        renderChart();
+      });
+      chartObserver.observe(node);
+    }
+  }
+
+  function renderChart() {
+    var node = document.getElementById('year-chart');
+    if (!node) return;
+    var months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+    var active = chartState.active;
+    var ns = 'http://www.w3.org/2000/svg';
+    function element(tag, attributes, parent) {
+      var el = document.createElementNS(ns, tag);
+      Object.keys(attributes).forEach(function (key) { el.setAttribute(key, attributes[key]); });
+      parent.appendChild(el);
+      return el;
+    }
+    var width = Math.max(300, Math.round(node.clientWidth)), height = 150;
+    var left = 32, right = width - 12, top = 7, bottom = 121;
+    var values = chartState.series.map(function (d) {
+      return { created: Math.max(0, Number(d.created) || 0), resolved: Math.max(0, Number(d.resolved) || 0) };
+    });
+    var max = Math.max.apply(null, [1].concat(values.reduce(function (acc, d) { return acc.concat([d.created, d.resolved]); }, [])));
+    var gridMax = Math.ceil(max / 4) * 4;
+    function x(index) { return left + (right - left) * index / 11; }
+    function y(value) { return bottom - (bottom - top) * value / gridMax; }
+    node.replaceChildren();
+    var svg = element('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'img', 'aria-label': 'Jira-Tickets nach Erstellungs- und Lösungsmonat' }, node);
+    var title = element('title', {}, svg); title.textContent = 'Erstellte und gelöste Jira-Tickets im Jahresverlauf';
+    for (var tick = 0; tick <= 4; tick++) {
+      var value = gridMax * tick / 4;
+      var yy = y(value);
+      element('line', { x1: left, x2: right, y1: yy, y2: yy, 'class': 'gridline' }, svg);
+      var label = element('text', { x: 3, y: yy + 4, 'class': 'axis-label' }, svg); label.textContent = value;
+    }
+    months.forEach(function (month, index) {
+      if (width < 550 && index % 2 && index !== 11) return;
+      var label = element('text', { x: x(index), y: 144, 'text-anchor': 'middle', 'class': 'axis-label' }, svg); label.textContent = month;
+    });
+    ['created', 'resolved'].forEach(function (kind) {
+      if (!active[kind] || values.length === 0) return;
+      var line = 'M ' + x(0) + ' ' + y(values[0][kind]);
+      values.slice(1).forEach(function (d, offset) {
+        var previous = values[offset], index = offset + 1, middle = (x(offset) + x(index)) / 2;
+        line += ' C ' + middle + ' ' + y(previous[kind]) + ' ' + middle + ' ' + y(d[kind]) + ' ' + x(index) + ' ' + y(d[kind]);
+      });
+      element('path', { d: line + ' L ' + x(values.length - 1) + ' ' + bottom + ' L ' + x(0) + ' ' + bottom + ' Z', 'class': 'area-' + kind }, svg);
+      element('path', { d: line, 'class': 'line-' + kind }, svg);
+      values.forEach(function (d, index) {
+        var point = element('circle', { cx: x(index), cy: y(d[kind]), r: 9, fill: 'transparent' }, svg);
+        var tooltip = element('title', {}, point); tooltip.textContent = months[index] + ': ' + d[kind] + (kind === 'created' ? ' erstellt' : ' gelöst');
+      });
+      var last = values.length - 1;
+      element('circle', { cx: x(last), cy: y(values[last][kind]), r: 3.5, 'class': 'end-' + kind }, svg);
+    });
+  }
+
+  // ------------------------------------------------------------ Start
+
+  var start = window.START_PATH && window.START_PATH.charAt(0) === '/' ? window.START_PATH : hashPath();
+  if (start !== hashPath()) navigate(start); else load('GET', start);
+})();
+</script>

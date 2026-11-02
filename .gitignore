@@ -10,3 +10,6 @@ coverage.xml
 htmlcov/
 .superpowers/
 node_modules/
+
+# Apps Script (clasp): enthält die Skript-ID
+apps-script/.clasp.json
