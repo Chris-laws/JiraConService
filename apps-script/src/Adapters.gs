@@ -41,7 +41,7 @@ function requestJson(method, url, options) {
   try {
     resp = UrlFetchApp.fetch(url, req);
   } catch (exc) {
-    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + (exc && exc.message ? exc.message.split('\n')[0] : 'Netzwerkfehler'));
+    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
   }
   var code = resp.getResponseCode();
   if (code < 200 || code >= 300) throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code);
@@ -50,6 +50,12 @@ function requestJson(method, url, options) {
   } catch (e) {
     throw new ErrorType(method + ' ' + host + ' lieferte kein JSON');
   }
+}
+
+/** Erste Zeile der Fehlermeldung, ohne Query-Teile von Adressen (dort könnten Tokens stehen). */
+function safeFetchMessage_(exc) {
+  var msg = exc && exc.message ? String(exc.message).split('\n')[0] : 'Netzwerkfehler';
+  return msg.replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/g, '$1').replace(/([?&](token|key|access_token|pat|password)=)[^&\s"']*/gi, '$1…').slice(0, 300);
 }
 
 function bearer_(token, extra) {
@@ -405,7 +411,8 @@ function readChunked_(cache, key) {
 }
 
 function writeChunked_(cache, key, text, seconds) {
-  var size = 90000, values = {}, n = 0;
+  // 32.000 Zeichen sind höchstens 96 KB, auch wenn jedes Zeichen 3 Bytes braucht (Grenze: 100 KB je Wert).
+  var size = 32000, values = {}, n = 0;
   for (var i = 0; i < text.length; i += size) values[key + ':' + (n++)] = text.slice(i, i + size);
   if (n > 200) return; // zu groß für den Cache, dann eben ohne
   try {
@@ -424,6 +431,33 @@ CachedJira.prototype.dashboardIssues = function () {
   var inner = this.inner;
   return cachedList_('jira:dashboard', function () { return inner.dashboardIssues(); }, ISSUE_DATES_);
 };
+/** ServiceNow-Incidents und -Changes für ein paar Minuten zwischenspeichern; einzelne Bugs aus der Liste. */
+function CachedServiceNow(inner) { this.inner = inner; }
+CachedServiceNow.prototype.bugs = function () {
+  var inner = this.inner;
+  return cachedList_('sn:bugs', function () { return inner.bugs(); }, ['first_seen']);
+};
+CachedServiceNow.prototype.bug = function (number) {
+  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
+  return hit || this.inner.bug(number);
+};
+CachedServiceNow.prototype.changes = function () {
+  var inner = this.inner;
+  return cachedList_('sn:changes', function () { return inner.changes(); }, ['deployed_at']);
+};
+
+function CachedConfluence(inner) { this.inner = inner; }
+CachedConfluence.prototype.pages = function () {
+  var inner = this.inner;
+  return cachedList_('confluence:pages', function () { return inner.pages(); }, []);
+};
+
+function CachedDocuments(inner) { this.inner = inner; }
+CachedDocuments.prototype.documents = function () {
+  var inner = this.inner;
+  return cachedList_('docs:' + inner.folderId, function () { return inner.documents(); }, []);
+};
+
 CachedJira.prototype.issuesByReporter = function (email) {
   var inner = this.inner;
   return cachedList_('jira:reporter:' + String(email).toLowerCase(), function () { return inner.issuesByReporter(email); }, ISSUE_DATES_);

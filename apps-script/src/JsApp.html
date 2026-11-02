@@ -388,10 +388,8 @@
     ['created', 'resolved'].forEach(function (kind) {
       if (!active[kind] || values.length === 0) return;
       var line = 'M ' + x(0) + ' ' + y(values[0][kind]);
-      values.slice(1).forEach(function (d, offset) {
-        var previous = values[offset], index = offset + 1, middle = (x(offset) + x(index)) / 2;
-        line += ' C ' + middle + ' ' + y(previous[kind]) + ' ' + middle + ' ' + y(d[kind]) + ' ' + x(index) + ' ' + y(d[kind]);
-      });
+      // Gerade Strecken zwischen den Monatswerten: eine Kurve würde Werte zwischen den Monaten erfinden.
+      values.slice(1).forEach(function (d, offset) { line += ' L ' + x(offset + 1) + ' ' + y(d[kind]); });
       element('path', { d: line + ' L ' + x(values.length - 1) + ' ' + bottom + ' L ' + x(0) + ' ' + bottom + ' Z', 'class': 'area-' + kind }, svg);
       element('path', { d: line, 'class': 'line-' + kind }, svg);
       values.forEach(function (d, index) {

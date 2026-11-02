@@ -19,13 +19,21 @@ function memoryProperties(initial) {
   };
 }
 
-function memoryCache() {
+// Grenzen wie in Apps Script: Schlüssel bis 250 Zeichen, Wert bis 100 KB (UTF-8-Bytes).
+const CACHE_KEY_MAX = 250;
+const CACHE_VALUE_MAX = 100 * 1024;
+function memoryCache(stats) {
   const store = new Map();
+  const check = (k, v) => {
+    if (String(k).length > CACHE_KEY_MAX) throw new Error('Cache-Schlüssel zu lang: ' + String(k).length);
+    if (Buffer.byteLength(String(v), 'utf8') > CACHE_VALUE_MAX) throw new Error('Argument too large: value');
+  };
   return {
-    get: (k) => (store.has(k) ? store.get(k) : null),
-    getAll: (keys) => { const out = {}; keys.forEach((k) => { if (store.has(k)) out[k] = store.get(k); }); return out; },
-    put: (k, v) => { store.set(k, v); },
-    putAll: (obj) => { Object.keys(obj).forEach((k) => store.set(k, obj[k])); },
+    get: (k) => { if (stats) stats.gets++; return store.has(k) ? store.get(k) : null; },
+    getAll: (keys) => { if (stats) stats.gets++; const out = {}; keys.forEach((k) => { if (store.has(k)) out[k] = store.get(k); }); return out; },
+    put: (k, v) => { check(k, v); if (stats) stats.puts++; store.set(k, String(v)); },
+    putAll: (obj) => { Object.keys(obj).forEach((k) => check(k, obj[k])); if (stats) stats.puts++; Object.keys(obj).forEach((k) => store.set(k, String(obj[k]))); },
+    size: () => store.size,
   };
 }
 
@@ -37,7 +45,7 @@ function createRuntime(options) {
   options = options || {};
   const scriptProps = memoryProperties(options.scriptProperties || {});
   const userProps = memoryProperties({});
-  const cache = memoryCache();
+  const cache = options.cache || memoryCache(options.cacheStats);
   const logs = [];
   const sandbox = {
     console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push(a.join(' ')), warn: () => {} },
@@ -54,6 +62,15 @@ function createRuntime(options) {
         if (!options.fetch) throw new Error('Kein Netz in der lokalen Laufzeit: ' + url.split('?')[0]);
         const r = options.fetch(url, req);
         return { getResponseCode: () => r.code, getContentText: () => r.text };
+      },
+      // Parallel wie in Apps Script; options.fetch erfährt über das dritte Argument, welche Aufrufe zusammen laufen.
+      fetchAll: (requests) => {
+        if (!options.fetch) throw new Error('Kein Netz in der lokalen Laufzeit');
+        const batch = { parallel: requests.length, id: Symbol('fetchAll') };
+        return requests.map((req) => {
+          const r = options.fetch(req.url, req, batch);
+          return { getResponseCode: () => r.code, getContentText: () => r.text };
+        });
       },
     },
     Utilities: {
@@ -77,6 +94,7 @@ function createRuntime(options) {
   const files = options.codeFiles || fs.readdirSync(SRC).filter((f) => f.endsWith('.gs')).sort().map((f) => path.join(SRC, f));
   for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), sandbox, { filename: path.basename(f) });
   sandbox.__logs = logs;
+  sandbox.__cache = cache;
   sandbox.__userProps = userProps;
   return sandbox;
 }
@@ -90,4 +108,4 @@ function renderIndex(vars, template) {
   return (template || read('Index')).replace(/<\?(!?)=\s*([\s\S]*?)\s*\?>/g, (m, raw, expr) => (raw ? String(evalExpr(expr)) : esc(evalExpr(expr))));
 }
 
-module.exports = { createRuntime, renderIndex, SRC };
+module.exports = { createRuntime, renderIndex, memoryCache, SRC };

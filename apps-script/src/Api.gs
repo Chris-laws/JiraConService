@@ -28,6 +28,10 @@ function apiRequest(method, path, params) {
   return JSON.stringify(response);
 }
 
+function safeDecode_(text) {
+  try { return decodeURIComponent(text); } catch (e) { return String(text); }
+}
+
 function last_(params, key, fallback) {
   var v = params[key];
   if (Array.isArray(v)) v = v.length ? v[v.length - 1] : undefined;
@@ -55,8 +59,8 @@ function route_(method, path, p) {
   if (method === 'GET' && path === '/wissen') return assistant_(req, [], last_(p, 'frage').trim(), ['jira', 'confluence']);
   if (method === 'POST' && path === '/wissen') return knowledgeChat_(req);
   if (method === 'GET' && path === '/bugs') return bugsPage_(req);
-  if (method === 'GET' && (m = /^\/bugs\/([^/]+)$/.exec(path))) return bugDetail_(req, decodeURIComponent(m[1]));
-  if (method === 'POST' && (m = /^\/bugs\/([^/]+)\/erklaerung$/.exec(path))) return bugExplanation_(req, decodeURIComponent(m[1]));
+  if (method === 'GET' && (m = /^\/bugs\/([^/]+)$/.exec(path))) return bugDetail_(req, safeDecode_(m[1]));
+  if (method === 'POST' && (m = /^\/bugs\/([^/]+)\/erklaerung$/.exec(path))) return bugExplanation_(req, safeDecode_(m[1]));
   if (method === 'GET' && path === '/streams') return streamsPage_(req);
   if (method === 'GET' && path === '/dokumente') return documentsPage_(req);
   if (method === 'GET' && path === '/releases') return releasesPage_(req);
@@ -181,6 +185,8 @@ function dashboardPage_(req) {
   }, { issues: issues });
 }
 
+var TICKET_PAGE_ = 250;
+
 function ticketsPage_(req) {
   var c = req.c, p = req.params;
   var r = block_(function () { return c.jira.dashboardIssues(); });
@@ -189,8 +195,15 @@ function ticketsPage_(req) {
   var selected = last_(p, 'scope') || last_(p, 'stream');
   if (allowed.concat(['adfcr']).indexOf(selected) < 0) selected = '';
   var q = last_(p, 'q'), phase = last_(p, 'phase'), epic = last_(p, 'epic');
+  var matched = filterScopeIssues(issues, selected, allowed, q, phase, epic);
+  // Große Boards: nur die ersten Zeilen schicken (Antwort klein, Seite schnell), „Weitere laden“ holt mehr.
+  var limit = Math.min(Math.max(parseInt(last_(p, 'limit'), 10) || TICKET_PAGE_, TICKET_PAGE_), 20 * TICKET_PAGE_);
   return render_(req, 'tickets', 'tickets', {
-    rows: filterScopeIssues(issues, selected, allowed, q, phase, epic),
+    rows: matched.slice(0, limit).map(function (i) {
+      return i.description && i.description.length > 240 ? cloneIssue_(i, { description: i.description.slice(0, 240) + '…' }) : i;
+    }),
+    matched: matched.length,
+    limit: limit,
     total: issues.length,
     error: r[1],
     scope: selected,

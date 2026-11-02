@@ -62,6 +62,7 @@ function VertexEmbedder(project, location, model) {
   this.location = location;
   this.model = model;
   this.batch = 50;
+  this.parallel = 6;
 }
 VertexEmbedder.prototype.embed = function (texts) {
   var cache = CacheService.getScriptCache();
@@ -82,21 +83,35 @@ VertexEmbedder.prototype.embed = function (texts) {
     else missing.push(i);
   });
   var url = vertexModelUrl(this.project, this.location, this.model, 'predict');
-  for (var start = 0; start < missing.length; start += this.batch) {
-    var chunk = missing.slice(start, start + this.batch);
-    var data = requestJson('POST', url, {
-      headers: vertexHeaders(this.project),
-      json: { instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) },
-      error: LlmUnavailable
+  var chunks = [];
+  for (var start = 0; start < missing.length; start += this.batch) chunks.push(missing.slice(start, start + this.batch));
+  // Mehrere Pakete gleichzeitig (UrlFetchApp.fetchAll): 2.000 neue Texte dauern so Sekunden statt einer Minute.
+  for (var g = 0; g < chunks.length; g += this.parallel) {
+    var group = chunks.slice(g, g + this.parallel);
+    var requests = group.map(function (chunk) {
+      return { url: url, method: 'post', headers: vertexHeaders(self.project), contentType: 'application/json', muteHttpExceptions: true,
+        payload: JSON.stringify({ instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) }) };
     });
-    if (!data || !Array.isArray(data.predictions) || data.predictions.length !== chunk.length) {
-      throw new LlmUnavailable('Vertex-Embedding-Antwort unerwartet');
+    var responses;
+    try {
+      responses = group.length === 1 ? [UrlFetchApp.fetch(url, requests[0])] : UrlFetchApp.fetchAll(requests);
+    } catch (exc) {
+      throw new LlmUnavailable('POST ' + url + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
     }
     var toCache = {};
-    chunk.forEach(function (i, n) {
-      var values = data.predictions[n].embeddings.values.map(function (v) { return Math.round(v * 1e6) / 1e6; });
-      vectors[i] = l2_(values);
-      toCache[keys[i]] = JSON.stringify(vectors[i]);
+    group.forEach(function (chunk, n) {
+      var code = responses[n].getResponseCode();
+      if (code < 200 || code >= 300) throw new LlmUnavailable('POST ' + url + ' antwortete mit HTTP ' + code);
+      var data;
+      try { data = JSON.parse(responses[n].getContentText()); } catch (e) { throw new LlmUnavailable('POST ' + url + ' lieferte kein JSON'); }
+      if (!data || !Array.isArray(data.predictions) || data.predictions.length !== chunk.length) {
+        throw new LlmUnavailable('Vertex-Embedding-Antwort unerwartet');
+      }
+      chunk.forEach(function (i, k) {
+        var values = data.predictions[k].embeddings.values.map(function (v) { return Math.round(v * 1e6) / 1e6; });
+        vectors[i] = l2_(values);
+        toCache[keys[i]] = JSON.stringify(vectors[i]);
+      });
     });
     try { cache.putAll(toCache, 21600); } catch (e) { /* Cache voll: egal */ }
   }

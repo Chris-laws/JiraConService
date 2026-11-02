@@ -240,7 +240,7 @@ TEMPLATES.tickets = function (c) {
   var content = `<div class="fitwrap">
 <div class="page-head">
   <div>
-    <p class="page-sub"><strong class="num">${e(c.rows.length)}</strong> von ${e(c.total)} Vorgängen aus vier ADL-Streams und ADFCR, nur lesend aus Jira.</p>
+    <p class="page-sub"><strong class="num">${e(c.matched === undefined ? c.rows.length : c.matched)}</strong> von ${e(c.total)} Vorgängen aus vier ADL-Streams und ADFCR, nur lesend aus Jira.</p>
   </div>
   <div class="page-actions"><a class="btn btn--primary" href="${u('/ticket')}">${icon('plus')}Ticket erstellen</a></div>
 </div>
@@ -278,6 +278,7 @@ ${c.epic ? '<p class="epic-filter-notice">Epic <strong class="mono">' + e(c.epic
 
 <section class="card card--flush" aria-label="Tickets">
   ${table}
+  ${c.matched > c.rows.length ? '<div class="table-more"><span class="num">1–' + e(c.rows.length) + ' von ' + e(c.matched) + '</span><a class="btn btn--secondary" href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase, epic: c.epic, limit: c.limit + 250 })) + '">Weitere 250 laden</a></div>' : ''}
 </section>
 </div>
 </div>`;
@@ -797,7 +798,7 @@ TEMPLATES.streams = function (c) {
   var content = `<div class="development fitwrap">
   <header class="development-intro">
     <div>
-      <p class="development-eyebrow">AD Fusion · Entwicklung</p>
+      <p class="development-eyebrow">Streams · Epics · Storys</p>
       <h2>Von der Anforderung zur Story</h2>
       <p>Vier ADL-Streams, zentral gepflegte Epics und die zugehörigen Jira-Storys. Jede Story gehört zu genau einem Stream.</p>
     </div>

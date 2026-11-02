@@ -548,7 +548,7 @@ function requestJson(method, url, options) {
   try {
     resp = UrlFetchApp.fetch(url, req);
   } catch (exc) {
-    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + (exc && exc.message ? exc.message.split('\n')[0] : 'Netzwerkfehler'));
+    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
   }
   var code = resp.getResponseCode();
   if (code < 200 || code >= 300) throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code);
@@ -557,6 +557,12 @@ function requestJson(method, url, options) {
   } catch (e) {
     throw new ErrorType(method + ' ' + host + ' lieferte kein JSON');
   }
+}
+
+/** Erste Zeile der Fehlermeldung, ohne Query-Teile von Adressen (dort könnten Tokens stehen). */
+function safeFetchMessage_(exc) {
+  var msg = exc && exc.message ? String(exc.message).split('\n')[0] : 'Netzwerkfehler';
+  return msg.replace(/(https?:\/\/[^\s?#"']+)[?#][^\s"']*/g, '$1').replace(/([?&](token|key|access_token|pat|password)=)[^&\s"']*/gi, '$1…').slice(0, 300);
 }
 
 function bearer_(token, extra) {
@@ -912,7 +918,8 @@ function readChunked_(cache, key) {
 }
 
 function writeChunked_(cache, key, text, seconds) {
-  var size = 90000, values = {}, n = 0;
+  // 32.000 Zeichen sind höchstens 96 KB, auch wenn jedes Zeichen 3 Bytes braucht (Grenze: 100 KB je Wert).
+  var size = 32000, values = {}, n = 0;
   for (var i = 0; i < text.length; i += size) values[key + ':' + (n++)] = text.slice(i, i + size);
   if (n > 200) return; // zu groß für den Cache, dann eben ohne
   try {
@@ -931,6 +938,33 @@ CachedJira.prototype.dashboardIssues = function () {
   var inner = this.inner;
   return cachedList_('jira:dashboard', function () { return inner.dashboardIssues(); }, ISSUE_DATES_);
 };
+/** ServiceNow-Incidents und -Changes für ein paar Minuten zwischenspeichern; einzelne Bugs aus der Liste. */
+function CachedServiceNow(inner) { this.inner = inner; }
+CachedServiceNow.prototype.bugs = function () {
+  var inner = this.inner;
+  return cachedList_('sn:bugs', function () { return inner.bugs(); }, ['first_seen']);
+};
+CachedServiceNow.prototype.bug = function (number) {
+  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
+  return hit || this.inner.bug(number);
+};
+CachedServiceNow.prototype.changes = function () {
+  var inner = this.inner;
+  return cachedList_('sn:changes', function () { return inner.changes(); }, ['deployed_at']);
+};
+
+function CachedConfluence(inner) { this.inner = inner; }
+CachedConfluence.prototype.pages = function () {
+  var inner = this.inner;
+  return cachedList_('confluence:pages', function () { return inner.pages(); }, []);
+};
+
+function CachedDocuments(inner) { this.inner = inner; }
+CachedDocuments.prototype.documents = function () {
+  var inner = this.inner;
+  return cachedList_('docs:' + inner.folderId, function () { return inner.documents(); }, []);
+};
+
 CachedJira.prototype.issuesByReporter = function (email) {
   var inner = this.inner;
   return cachedList_('jira:reporter:' + String(email).toLowerCase(), function () { return inner.issuesByReporter(email); }, ISSUE_DATES_);
@@ -1002,6 +1036,7 @@ function VertexEmbedder(project, location, model) {
   this.location = location;
   this.model = model;
   this.batch = 50;
+  this.parallel = 6;
 }
 VertexEmbedder.prototype.embed = function (texts) {
   var cache = CacheService.getScriptCache();
@@ -1022,21 +1057,35 @@ VertexEmbedder.prototype.embed = function (texts) {
     else missing.push(i);
   });
   var url = vertexModelUrl(this.project, this.location, this.model, 'predict');
-  for (var start = 0; start < missing.length; start += this.batch) {
-    var chunk = missing.slice(start, start + this.batch);
-    var data = requestJson('POST', url, {
-      headers: vertexHeaders(this.project),
-      json: { instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) },
-      error: LlmUnavailable
+  var chunks = [];
+  for (var start = 0; start < missing.length; start += this.batch) chunks.push(missing.slice(start, start + this.batch));
+  // Mehrere Pakete gleichzeitig (UrlFetchApp.fetchAll): 2.000 neue Texte dauern so Sekunden statt einer Minute.
+  for (var g = 0; g < chunks.length; g += this.parallel) {
+    var group = chunks.slice(g, g + this.parallel);
+    var requests = group.map(function (chunk) {
+      return { url: url, method: 'post', headers: vertexHeaders(self.project), contentType: 'application/json', muteHttpExceptions: true,
+        payload: JSON.stringify({ instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) }) };
     });
-    if (!data || !Array.isArray(data.predictions) || data.predictions.length !== chunk.length) {
-      throw new LlmUnavailable('Vertex-Embedding-Antwort unerwartet');
+    var responses;
+    try {
+      responses = group.length === 1 ? [UrlFetchApp.fetch(url, requests[0])] : UrlFetchApp.fetchAll(requests);
+    } catch (exc) {
+      throw new LlmUnavailable('POST ' + url + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
     }
     var toCache = {};
-    chunk.forEach(function (i, n) {
-      var values = data.predictions[n].embeddings.values.map(function (v) { return Math.round(v * 1e6) / 1e6; });
-      vectors[i] = l2_(values);
-      toCache[keys[i]] = JSON.stringify(vectors[i]);
+    group.forEach(function (chunk, n) {
+      var code = responses[n].getResponseCode();
+      if (code < 200 || code >= 300) throw new LlmUnavailable('POST ' + url + ' antwortete mit HTTP ' + code);
+      var data;
+      try { data = JSON.parse(responses[n].getContentText()); } catch (e) { throw new LlmUnavailable('POST ' + url + ' lieferte kein JSON'); }
+      if (!data || !Array.isArray(data.predictions) || data.predictions.length !== chunk.length) {
+        throw new LlmUnavailable('Vertex-Embedding-Antwort unerwartet');
+      }
+      chunk.forEach(function (i, k) {
+        var values = data.predictions[k].embeddings.values.map(function (v) { return Math.round(v * 1e6) / 1e6; });
+        vectors[i] = l2_(values);
+        toCache[keys[i]] = JSON.stringify(vectors[i]);
+      });
     });
     try { cache.putAll(toCache, 21600); } catch (e) { /* Cache voll: egal */ }
   }
@@ -1617,9 +1666,9 @@ function buildContainer(settings) {
   if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
     c.jiraWriter = new JiraRestWriter(s);
-    c.confluence = new ConfluenceRest(s);
-    c.servicenow = new ServiceNowRest(s);
-    c.documents = s.docsFolderId ? new DriveDocuments(s.docsFolderId) : new MockDocuments();
+    c.confluence = new CachedConfluence(new ConfluenceRest(s));
+    c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
+    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new MockDocuments();
   } else {
     c.jira = new MockJira();
     c.jiraWriter = new MockJiraWriter(s.jiraWriteEnabled);
@@ -2062,6 +2111,10 @@ function apiRequest(method, path, params) {
   return JSON.stringify(response);
 }
 
+function safeDecode_(text) {
+  try { return decodeURIComponent(text); } catch (e) { return String(text); }
+}
+
 function last_(params, key, fallback) {
   var v = params[key];
   if (Array.isArray(v)) v = v.length ? v[v.length - 1] : undefined;
@@ -2089,8 +2142,8 @@ function route_(method, path, p) {
   if (method === 'GET' && path === '/wissen') return assistant_(req, [], last_(p, 'frage').trim(), ['jira', 'confluence']);
   if (method === 'POST' && path === '/wissen') return knowledgeChat_(req);
   if (method === 'GET' && path === '/bugs') return bugsPage_(req);
-  if (method === 'GET' && (m = /^\/bugs\/([^/]+)$/.exec(path))) return bugDetail_(req, decodeURIComponent(m[1]));
-  if (method === 'POST' && (m = /^\/bugs\/([^/]+)\/erklaerung$/.exec(path))) return bugExplanation_(req, decodeURIComponent(m[1]));
+  if (method === 'GET' && (m = /^\/bugs\/([^/]+)$/.exec(path))) return bugDetail_(req, safeDecode_(m[1]));
+  if (method === 'POST' && (m = /^\/bugs\/([^/]+)\/erklaerung$/.exec(path))) return bugExplanation_(req, safeDecode_(m[1]));
   if (method === 'GET' && path === '/streams') return streamsPage_(req);
   if (method === 'GET' && path === '/dokumente') return documentsPage_(req);
   if (method === 'GET' && path === '/releases') return releasesPage_(req);
@@ -2215,6 +2268,8 @@ function dashboardPage_(req) {
   }, { issues: issues });
 }
 
+var TICKET_PAGE_ = 250;
+
 function ticketsPage_(req) {
   var c = req.c, p = req.params;
   var r = block_(function () { return c.jira.dashboardIssues(); });
@@ -2223,8 +2278,15 @@ function ticketsPage_(req) {
   var selected = last_(p, 'scope') || last_(p, 'stream');
   if (allowed.concat(['adfcr']).indexOf(selected) < 0) selected = '';
   var q = last_(p, 'q'), phase = last_(p, 'phase'), epic = last_(p, 'epic');
+  var matched = filterScopeIssues(issues, selected, allowed, q, phase, epic);
+  // Große Boards: nur die ersten Zeilen schicken (Antwort klein, Seite schnell), „Weitere laden“ holt mehr.
+  var limit = Math.min(Math.max(parseInt(last_(p, 'limit'), 10) || TICKET_PAGE_, TICKET_PAGE_), 20 * TICKET_PAGE_);
   return render_(req, 'tickets', 'tickets', {
-    rows: filterScopeIssues(issues, selected, allowed, q, phase, epic),
+    rows: matched.slice(0, limit).map(function (i) {
+      return i.description && i.description.length > 240 ? cloneIssue_(i, { description: i.description.slice(0, 240) + '…' }) : i;
+    }),
+    matched: matched.length,
+    limit: limit,
     total: issues.length,
     error: r[1],
     scope: selected,

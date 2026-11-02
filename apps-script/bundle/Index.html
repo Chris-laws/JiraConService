@@ -1372,6 +1372,68 @@ body {
 .fatal { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; max-width: min(640px, calc(100vw - 32px)); display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-radius: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); box-shadow: var(--shadow-float); font-size: 14px; }
 .fatal[hidden] { display: none; }
 .boot { min-height: 100vh; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+
+/* ---------------------------------------------------------------------------------------------
+   Taste-Durchgang (App-Screen-Regeln): keine Schrift unter 11 px, Text mit mindestens 4,5:1,
+   flache Flächen statt Verläufen und Milchglas, ruhige Hauptaktion, Zahlen in Tabellenziffern.
+   Die Stream-Farben bleiben für Punkte und Balken; Text in diesen Farben bekommt im hellen
+   Modus einen dunkleren Ton derselben Farbe (--hue-ink).
+   --------------------------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  --blue-ink: #1a5fd0; --teal-ink: #0b7a6b; --amber-ink: #8a5300; --rose-ink: #b4234a;
+  --green-ink: #19703e; --sky-ink: #0a6a9e; --slate-ink: #475569; --ok: #1d7a35;
+}
+.hue-blue { --hue-ink: var(--blue-ink, var(--blue)); }
+.hue-teal { --hue-ink: var(--teal-ink, var(--teal)); }
+.hue-amber { --hue-ink: var(--amber-ink, var(--amber)); }
+.hue-rose { --hue-ink: var(--rose-ink, var(--rose)); }
+.hue-green { --hue-ink: var(--green-ink, var(--green)); }
+.hue-sky { --hue-ink: var(--sky-ink, var(--sky)); }
+.hue-slate { --hue-ink: var(--slate-ink, var(--slate)); }
+.pill--neutral { --hue-ink: var(--blue-ink, var(--blue)); }
+.pill--positive { --hue-ink: var(--green-ink, var(--green)); }
+.pill--negative { --hue-ink: var(--rose-ink, var(--rose)); }
+.pill--warning { --hue-ink: var(--amber-ink, var(--amber)); }
+.pill--muted { --hue-ink: var(--slate-ink, var(--slate)); }
+.pill { color: var(--hue-ink, var(--hue, var(--slate))); }
+.pill::before { background: var(--hue, currentColor); }
+.kw span, .tag, .board-ticket-stream, .development-epic-key { color: var(--hue-ink, var(--hue, var(--muted))); }
+.tag::before { background: var(--hue, currentColor); }
+
+/* Flache Hauptaktion und Flächen */
+.btn--primary { background: var(--primary); box-shadow: none; }
+.btn--primary:hover { background: color-mix(in srgb, var(--primary) 88%, #000); box-shadow: none; }
+.lead-change { background: var(--accent-soft); }
+.appbar { background: var(--ground); backdrop-filter: none; -webkit-backdrop-filter: none; }
+@media (max-width: 900px) { .topbar { background: var(--ground); backdrop-filter: none; -webkit-backdrop-filter: none; } }
+
+/* Kleinste Schrift 11 px */
+.board-kpi small, .board-panel-meta, .board-series > span, .board-donut span, .status-legend-row,
+.status-legend-row strong, .status-legend-row small, .scope-section-head, .board-filter, .board-ticket-stream,
+.development-eyebrow, .development-kicker, .development-epic-key, .development-epic-count, .development-story-list a,
+.development-story-list small, .development-no-story, .development-card-foot, .development-country small,
+.development-requirement-grid article > span, .development-requirement-grid a, .knowledge-kicker { font-size: 11px; }
+@media (max-width: 640px) {
+  .board-kpi > span, .board-kpi small, .board-ticket-row > small, .board-ticket-row .when { font-size: 11px; }
+}
+.status-legend-row { grid-template-columns: 7px minmax(0, 1fr) 20px 34px; }
+
+/* Höchstens ein Großbuchstaben-Label je Seite: die Karten-Kicker in Satzschreibung */
+.development-kicker { text-transform: none; letter-spacing: 0; font-weight: 600; }
+
+/* Zahlen springen nicht: Tabellenziffern überall, wo Werte stehen */
+.num, .kpi-n, .board-kpi strong, .status-legend-row strong, .status-legend-row small, .development-epic-count,
+.ring > span, .lead-change .big, .badge, .nav-count, td { font-variant-numeric: tabular-nums; }
+
+/* Dunkel: die Hauptaktion mit dunkler Schrift auf hellem Blau (sonst 2,5:1) */
+:root[data-theme="dark"] .btn--primary { color: #06142b; }
+:root[data-theme="dark"] .btn--primary:hover { background: color-mix(in srgb, var(--primary) 85%, #fff); }
+
+/* Backlog-Suche: gleiche Höhe wie die Filter-Reihe, Lupe nicht über dem Text */
+.ix .board-backlog-search input:not([type=checkbox]):not([type=radio]) { width: 100%; height: 32px; min-height: 32px; padding: 0 10px 0 33px; border: 1px solid var(--card-line); border-radius: 7px; font-size: 13px; }
+
+/* Lange Ticketliste: Bereich und „Weitere laden“ unter der Tabelle */
+.table-more { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 13px; }
 </style>
   <script>
     var t = "light";
@@ -1978,7 +2040,7 @@ TEMPLATES.tickets = function (c) {
   var content = `<div class="fitwrap">
 <div class="page-head">
   <div>
-    <p class="page-sub"><strong class="num">${e(c.rows.length)}</strong> von ${e(c.total)} Vorgängen aus vier ADL-Streams und ADFCR, nur lesend aus Jira.</p>
+    <p class="page-sub"><strong class="num">${e(c.matched === undefined ? c.rows.length : c.matched)}</strong> von ${e(c.total)} Vorgängen aus vier ADL-Streams und ADFCR, nur lesend aus Jira.</p>
   </div>
   <div class="page-actions"><a class="btn btn--primary" href="${u('/ticket')}">${icon('plus')}Ticket erstellen</a></div>
 </div>
@@ -2016,6 +2078,7 @@ ${c.epic ? '<p class="epic-filter-notice">Epic <strong class="mono">' + e(c.epic
 
 <section class="card card--flush" aria-label="Tickets">
   ${table}
+  ${c.matched > c.rows.length ? '<div class="table-more"><span class="num">1–' + e(c.rows.length) + ' von ' + e(c.matched) + '</span><a class="btn btn--secondary" href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase, epic: c.epic, limit: c.limit + 250 })) + '">Weitere 250 laden</a></div>' : ''}
 </section>
 </div>
 </div>`;
@@ -2535,7 +2598,7 @@ TEMPLATES.streams = function (c) {
   var content = `<div class="development fitwrap">
   <header class="development-intro">
     <div>
-      <p class="development-eyebrow">AD Fusion · Entwicklung</p>
+      <p class="development-eyebrow">Streams · Epics · Storys</p>
       <h2>Von der Anforderung zur Story</h2>
       <p>Vier ADL-Streams, zentral gepflegte Epics und die zugehörigen Jira-Storys. Jede Story gehört zu genau einem Stream.</p>
     </div>
@@ -3022,10 +3085,8 @@ TEMPLATES.notfound = function (c) {
     ['created', 'resolved'].forEach(function (kind) {
       if (!active[kind] || values.length === 0) return;
       var line = 'M ' + x(0) + ' ' + y(values[0][kind]);
-      values.slice(1).forEach(function (d, offset) {
-        var previous = values[offset], index = offset + 1, middle = (x(offset) + x(index)) / 2;
-        line += ' C ' + middle + ' ' + y(previous[kind]) + ' ' + middle + ' ' + y(d[kind]) + ' ' + x(index) + ' ' + y(d[kind]);
-      });
+      // Gerade Strecken zwischen den Monatswerten: eine Kurve würde Werte zwischen den Monaten erfinden.
+      values.slice(1).forEach(function (d, offset) { line += ' L ' + x(offset + 1) + ' ' + y(d[kind]); });
       element('path', { d: line + ' L ' + x(values.length - 1) + ' ' + bottom + ' L ' + x(0) + ' ' + bottom + ' Z', 'class': 'area-' + kind }, svg);
       element('path', { d: line, 'class': 'line-' + kind }, svg);
       values.forEach(function (d, index) {
