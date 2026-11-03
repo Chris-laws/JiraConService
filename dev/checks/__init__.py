@@ -1,6 +1,6 @@
 """Registry aller Guard-Checks. Neuer Check = neuer Eintrag."""
 
-from dev.checks import quality, runtime, security, ui
+from dev.checks import appscript, quality, runtime, security, ui
 from dev.checks.base import Check
 
 CHECKS: tuple[Check, ...] = (
@@ -19,4 +19,12 @@ CHECKS: tuple[Check, ...] = (
     Check("load", "Last-Kurzprofil gegen Mocks", f"p95 ≤ {runtime.LOAD_P95_MS} ms", runtime.load),
     Check("budget", "Kaltstart und Abhängigkeiten", f"≤ {runtime.COLD_START_S} s, ≤ {runtime.MAX_RUNTIME_DEPS} Pakete", runtime.budget),
     Check("license", "erlaubte Lizenzen, Markenhinweis", "nur Allowlist", runtime.license_check),
+    Check("brand", "keine Firmen- oder internen Namen im öffentlichen Repo", "0 Treffer", appscript.brand),
+    Check("as-tests", "Apps Script: Seiten, Live-Adapter, Vertex-Header, Bundle aktuell", "alle grün", appscript.tests),
+    Check("as-readonly", "Apps Script liest nur: alle Abrufe durch die Sperre, nur GET an Jira/Confluence/ServiceNow, keine Schreib-Berechtigungen", "0 Befunde", appscript.readonly),
+    Check("as-privacy", "Apps Script: Prompts nur nach redact(), Melder bleibt auf dem Server", "0 Befunde", appscript.privacy),
+    Check("as-stress", "Apps Script: 500/2.000 Tickets, Cache unter 100 KB je Wert, 4.775 Fuzzing-Aufrufe", "Seite mit Cache < 30 s, kein Absturz, keine Tokens", appscript.stress),
+    Check("as-budget", "Apps Script: Seitengröße, größte Antwort, Laufzeit mit Cache; Budgets nur senken (Ratsche)", "unter budgets.json", appscript.budget),
+    Check("as-load", "Apps Script: Lastsimulation mit 30 gleichzeitigen Ausführungen, Wiederholung, Erlang-B", "300 Personen: p95 ≤ 3 s, ≤ 0,5 % gescheitert", appscript.load),
+    Check("as-ui", "Apps Script im Browser: XSS, Kontrast, Schrift, A11y, Layout, Englisch", "0 Befunde außer begründeten Ausnahmen", appscript.ui),
 )  # fmt: skip

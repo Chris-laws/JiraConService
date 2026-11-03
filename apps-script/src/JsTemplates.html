@@ -1,0 +1,897 @@
+<script>
+// Seitenvorlagen. Jede Funktion entspricht einer Jinja-Vorlage der bisherigen Web-App (gleiche Struktur und
+// CSS-Klassen), damit die Oberfläche 1:1 gleich aussieht. Alle Daten laufen durch e() (HTML-sicher).
+
+var TEMPLATES = {};
+
+// ---------------------------------------------------------------- Rahmen (base.html)
+
+function brandName(name) {
+  return /Align$/.test(name) ? e(name.slice(0, -5)) + '<span class="brand-y">Align</span>' : e(name);
+}
+
+function navItem(c, key, href, label, ic, count, alert) {
+  var on = c.active === key;
+  return '<a class="nav-item' + (on ? ' is-active' : '') + '" href="' + u(href) + '" title="' + e(label) + '"' + (on ? ' aria-current="page"' : '') + '>\n  ' +
+    icon(ic) + '<span class="nav-label">' + e(label) + '</span>' +
+    (count ? '<span class="nav-count' + (alert ? ' nav-count--alert' : '') + '" aria-label="' + e(count) + ' offen">' + e(count) + '</span>' : '') + '\n</a>';
+}
+
+function layout(c, title, sheetClass, content) {
+  var me = c.me;
+  var back = c.path;
+  var backWithQuery = c.path + (c.query_string ? '?' + c.query_string : '');
+  var userBlock;
+  if (c.mock && !me.from_login) {
+    userBlock = `<details class="user-menu">
+        <summary class="user-row">
+          <span class="avatar" aria-hidden="true">${e(me.initials)}</span>
+          <span class="user-text"><span class="user-name">${e(me.name)}</span><span class="user-role">${e(t('Rolle'))} ${e(me.role)} · ${e(t('Einstellungen'))}</span></span>
+          ${icon('updown', 'ic ic-sm')}
+        </summary>
+        <form class="user-switch" action="/benutzer" method="post">
+          <input type="hidden" name="back" value="${e(back)}">
+          <p class="hint">Nur im Testbetrieb: Person und Rolle wechseln.</p>
+          <label class="field-label" for="sw-user">Person</label>
+          <select id="sw-user" name="user" class="control">
+            ${each(c.people, function (p) { return '<option value="' + e(p) + '"' + (p === me.email ? ' selected' : '') + '>' + e(p) + '</option>'; })}
+          </select>
+          <label class="field-label" for="sw-role">Rolle</label>
+          <select id="sw-role" name="role" class="control">
+            ${each(c.roles, function (r) { return '<option' + (r === me.role ? ' selected' : '') + '>' + e(r) + '</option>'; })}
+          </select>
+          <button class="btn btn--secondary btn--block" type="submit">Wechseln</button>
+        </form>
+      </details>`;
+  } else {
+    userBlock = `<div class="user-row">
+        <span class="avatar" aria-hidden="true">${e(me.initials)}</span>
+        <span class="user-text"><span class="user-name">${e(me.name)}</span><span class="user-role">${e(t('Rolle'))} ${e(me.role)}</span></span>
+      </div>`;
+  }
+  var docsOpen = c.active === 'docs' || c.active === 'releases';
+  return `<a class="skip" href="#main" data-skip>${e(t('Zum Inhalt springen'))}</a>
+<div class="shell">
+  <header class="topbar">
+    <button class="icon-btn" type="button" data-nav-open aria-label="Menü öffnen" aria-controls="sidebar" aria-expanded="false">${icon('menu')}</button>
+    <a class="brand brand--compact" href="${u('/')}"><img src="${MARK_SRC}" alt="" width="24" height="24"><span>${brandName(c.app_name)}</span></a>
+    <a class="icon-btn" href="${u('/ticket')}" aria-label="Ticket erstellen">${icon('plus')}</a>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Navigation">
+    <div class="side-head">
+      <a class="brand" href="${u('/')}">
+        <img src="${MARK_SRC}" alt="" width="34" height="34">
+        <span class="brand-name">${brandName(c.app_name)}</span>
+      </a>
+      <button class="icon-btn side-collapse" type="button" data-sidebar-toggle aria-controls="sidebar" aria-expanded="true" aria-label="Seitenleiste einklappen" title="Seitenleiste einklappen">${icon('menu')}</button>
+      <button class="icon-btn side-close" type="button" data-nav-close aria-label="Menü schließen">${icon('close')}</button>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">
+        ${navItem(c, 'dashboard', '/', t('Übersicht'), 'overview')}
+        ${navItem(c, 'ticket', '/ticket', t('Neue Anforderung'), 'pen')}
+        ${navItem(c, 'mine', '/meine-tickets', t('Meine Tickets'), 'inbox', c.nav_counts.mine)}
+        ${navItem(c, 'tickets', '/tickets', t('Alle Tickets'), 'list')}
+        ${navItem(c, 'streams', '/streams', t('Systementwicklung'), 'layers')}
+      </div>
+      <div class="nav-group">
+        <p class="nav-heading">${e(t('Wissen & Klärung'))}</p>
+        ${navItem(c, 'knowledge', '/wissen', t('Wissen durchsuchen'), 'search')}
+        <details class="nav-disclosure"${docsOpen ? ' open' : ''}>
+          <summary class="nav-item nav-disclosure-toggle" aria-label="Dokumentation auf- oder zuklappen" title="Dokumentation">
+            ${icon('book')}<span class="nav-label">${e(t('Dokumentation'))}</span>
+            <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </summary>
+          <div class="nav-disclosure-children">
+            ${navItem(c, 'docs', '/dokumente', t('Anleitungen'), 'book')}
+            ${navItem(c, 'releases', '/releases', t('Änderungen & Releases'), 'layers')}
+          </div>
+        </details>
+        ${navItem(c, 'bugs', '/bugs', t('Bug-Ursachen klären'), 'bug', c.nav_counts.bugs)}
+      </div>
+      <div class="nav-group">
+        ${me.role === 'INT' ? navItem(c, 'admin', '/admin', 'Admin', 'gear') : ''}
+      </div>
+    </nav>
+
+    <div class="side-foot">
+      ${userBlock}
+    </div>
+  </aside>
+  <div class="scrim" data-nav-close></div>
+
+  <main class="sheet${sheetClass}" id="main" tabindex="-1">
+    <header class="appbar">
+      <h1 class="appbar-title">${e(title)}</h1>
+      <form class="top-search" action="/tickets" method="get" role="search">
+        <label class="sr-only" for="top-q">${e(t('Tickets suchen'))}</label>
+        ${icon('search')}<input id="top-q" name="q" type="search" placeholder="${e(t('Tickets, Epics und Streams suchen …'))}" autocomplete="off"><kbd aria-hidden="true">/</kbd>
+      </form>
+      <a class="ai-cta" href="${u('/wissen')}"${c.active === 'knowledge' ? ' aria-current="page"' : ''}>${icon('spark')}${e(t('KI fragen'))}</a>
+      <span class="appbar-sep" aria-hidden="true"></span>
+      <a class="icon-btn" href="${u('/dokumente')}" aria-label="${e(t('Hilfe'))}" title="${e(t('Hilfe'))}">${icon('help')}</a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="${e(t('Hell oder dunkel'))}" title="${e(t('Hell oder dunkel'))}">${icon('monitor')}</button>
+      <form class="lang-seg" action="/sprache" method="post" aria-label="${e(t('Sprache'))}">
+        <input type="hidden" name="back" value="${e(backWithQuery)}">
+        <button type="submit" name="lang" value="de"${c.lang === 'de' ? ' aria-pressed="true"' : ''}>DE</button>
+        <button type="submit" name="lang" value="en"${c.lang === 'en' ? ' aria-pressed="true"' : ''}>EN</button>
+      </form>
+    </header>
+    ${each(c.notices, function (n) { return '<p class="notice">' + icon('alert', 'ic ic-sm') + ' ' + e(n) + '</p>'; })}
+    ${content}
+  </main>
+</div>`;
+}
+
+// ---------------------------------------------------------------- Übersicht (dashboard.html)
+
+TEMPLATES.dashboard = function (c) {
+  var scopeQ = c.scope ? '?' + query({ scope: c.scope }) : '';
+  var nonCountry = c.scopes.filter(function (s) { return s.id !== 'adfcr'; });
+  var country = c.scopes.filter(function (s) { return s.id === 'adfcr'; });
+  var backlog;
+  if (c.issues_error) {
+    backlog = '<p class="board-empty">Jira ist gerade nicht erreichbar: ' + e(c.issues_error) + '</p>';
+  } else if (!c.backlog.length) {
+    backlog = '<p class="board-empty">Kein offenes Ticket passt zu dieser Auswahl.</p>';
+  } else {
+    backlog = each(c.backlog, function (i) {
+      return '<div class="board-ticket-row"><small>' + e(i.key) + '</small><div><a href="' + e(i.url) + '" target="_blank" rel="noopener">' + e(i.summary) +
+        '</a><span class="board-ticket-stream hue-' + e(hue(i.stream)) + '">' + e(i.stream ? stream_label(i.stream) : 'ADFCR · Länderreports') +
+        '</span></div><span class="pill ' + pill_tone(i.status) + '">' + e(phase_label(i.status)) + '</span><span class="when">' + e(relative_day(i.updated)) + '</span></div>';
+    });
+  }
+  var content = `<div class="ix board-dashboard">
+  <section class="board-welcome" aria-label="${e(t('Begrüßung'))}">
+    <div class="board-welcome-copy">
+      <span class="avatar board-avatar" aria-hidden="true">${e(c.me.initials)}</span>
+      <div><h2>${e(t('Hallo'))}, ${e(c.me.name.split(' ')[0])}!</h2><p>${e(long_date(c.now, c.lang))}</p></div>
+    </div>
+    <a class="board-new" href="${u('/ticket')}">${icon('plus')}${e(t('Neue Anforderung'))}</a>
+  </section>
+
+  <div class="board-kpis" aria-label="Kennzahlen aus Jira">
+    <a class="board-kpi" href="${u('/meine-tickets')}"><span>Meine offenen Tickets</span><strong class="kpi-n num">${e(c.mine_open)}</strong><small>Meine Vorgänge ansehen ${icon('arrow')}</small></a>
+    <a class="board-kpi" href="${u('/tickets' + scopeQ)}"><span>Tickets im Bereich</span><strong class="kpi-n num">${e(c.total)}</strong><small>Bereich ansehen ${icon('arrow')}</small></a>
+    <a class="board-kpi" href="${u('/' + scopeQ)}" data-anchor="backlog-title"><span>Offen im Bereich</span><strong class="kpi-n num">${e(c.open_total)}</strong><small>Im Backlog ansehen ${icon('arrow')}</small></a>
+    <a class="board-kpi" href="${u('/meine-tickets')}"><span>Rückfragen an mich</span><strong class="kpi-n num${c.questions_for_me ? ' is-alert' : ''}">${e(c.questions_for_me)}</strong><small>${c.questions_for_me ? 'Antwort erforderlich' : 'Keine Rückfragen'} ${icon('arrow')}</small></a>
+  </div>
+
+  <section class="board-panel board-chart" aria-labelledby="year-chart-title">
+      <div class="board-panel-head"><div><h2 id="year-chart-title">Ticketverlauf ${e(c.chart_year)}</h2><p>Neue und gelöste Jira-Tickets je Monat · ${e(c.scope_summary.label)}</p></div><span class="board-panel-meta">${e(c.total)} Tickets im Bestand</span></div>
+      <div class="board-chart-wrap"><div id="year-chart" class="board-year-chart" role="img" aria-label="Monatlicher Verlauf erstellter und gelöster Jira-Tickets ${e(c.chart_year)}"></div></div>
+      <div class="board-series" aria-label="Datenreihen ein- oder ausblenden">
+        <button type="button" data-series="created" aria-pressed="true"><i class="series-dot is-created"></i>Erstellt</button>
+        <button type="button" data-series="resolved" aria-pressed="true"><i class="series-dot is-resolved"></i>Gelöst</button>
+        <span>${e(c.scope_summary.label)} · ${e(c.chart_year)}</span>
+      </div>
+  </section>
+
+  <div class="board-main-grid">
+    <section class="board-panel board-backlog" aria-labelledby="backlog-title">
+      <div class="board-panel-head"><div><h2 id="backlog-title">Backlog</h2><p>Offene Anforderungen · ${e(c.scope_summary.label)}</p></div><a class="board-all-link" href="${u('/tickets' + scopeQ)}">Alle Tickets ansehen ${icon('arrow')}</a></div>
+      <div class="board-backlog-controls">
+        <div class="board-filter-list" aria-label="Backlog nach Bereich filtern">
+          <a class="board-filter${!c.scope ? ' is-active' : ''}" href="${u('/' + (c.q ? '?' + query({ q: c.q }) : ''))}"${!c.scope ? ' aria-current="true"' : ''}>Alle</a>
+          ${each(nonCountry, function (s) { return '<a class="board-filter' + (c.scope === s.id ? ' is-active' : '') + '" href="' + u('/?' + query({ scope: s.id, q: c.q })) + '"' + (c.scope === s.id ? ' aria-current="true"' : '') + '>' + e(s.label) + '</a>'; })}
+          ${each(country, function () { return '<a class="board-filter board-filter--country' + (c.scope === 'adfcr' ? ' is-active' : '') + '" href="' + u('/?' + query({ scope: 'adfcr', q: c.q })) + '"' + (c.scope === 'adfcr' ? ' aria-current="true"' : '') + '>ADFCR</a>'; })}
+        </div>
+        <form class="board-backlog-search" action="/" method="get" role="search">
+          ${c.scope ? '<input type="hidden" name="scope" value="' + e(c.scope) + '">' : ''}
+          <label class="sr-only" for="q">Backlog durchsuchen</label>
+          ${icon('search')}<input id="q" name="q" type="search" value="${e(c.q)}" placeholder="Tickets suchen" autocomplete="off">
+        </form>
+      </div>
+      <div class="board-backlog-list">
+        ${backlog}
+      </div>
+    </section>
+
+    <section class="board-panel board-status" aria-labelledby="status-title">
+      <div class="board-panel-head"><div><h2 id="status-title">Status-Verteilung</h2><p>${e(c.scope_summary.label)} · ${e(c.total)} Tickets</p></div><span class="board-panel-meta">Aktueller Stand</span></div>
+      <div class="board-status-body">
+        <div class="board-donut" style="background: ${e(c.donut)}" role="img" aria-label="Statusverteilung für ${e(c.scope_summary.label)}"><div><strong class="num">${e(c.total)}</strong><span>Tickets</span></div></div>
+        <div class="board-status-legend">
+          ${c.shares.length ? each(c.shares, function (s) { return '<div class="status-legend-row"><i style="background: ' + e(s.color) + '"></i><span>' + e(s.label) + '</span><strong class="num">' + e(s.count) + '</strong><small class="num">' + py_round(s.share * 100) + ' %</small></div>'; }) : '<p class="board-empty">Keine Tickets im gewählten Bereich.</p>'}
+        </div>
+      </div>
+      <div class="board-scope-section">
+        <div class="scope-section-head"><strong>Bereich auswählen</strong><span>Tickets</span></div>
+        <div class="scope-list">
+          <a class="scope-pill${!c.scope ? ' is-active' : ''}" href="${u('/' + (c.q ? '?' + query({ q: c.q }) : ''))}"${!c.scope ? ' aria-current="true"' : ''}><span>Alle Bereiche</span><b class="num">${e(c.overall_total)}</b></a>
+          ${each(nonCountry, function (s) { return '<a class="scope-pill' + (c.scope === s.id ? ' is-active' : '') + '" href="' + u('/?' + query({ scope: s.id, q: c.q })) + '"' + (c.scope === s.id ? ' aria-current="true"' : '') + '><span>' + e(s.label) + '</span><b class="num">' + e(s.count) + '</b></a>'; })}
+          ${each(country, function (s) { return '<a class="scope-pill scope-pill--country' + (c.scope === 'adfcr' ? ' is-active' : '') + '" href="' + u('/?' + query({ scope: 'adfcr', q: c.q })) + '"' + (c.scope === 'adfcr' ? ' aria-current="true"' : '') + '><span>ADFCR · Länderreports</span><b class="num">' + e(s.count) + '</b></a>'; })}
+        </div>
+      </div>
+    </section>
+  </div>
+</div>`;
+  return layout(c, t('Übersicht'), '', content);
+};
+
+// ---------------------------------------------------------------- Alle Tickets (tickets.html)
+
+TEMPLATES.tickets = function (c) {
+  var table;
+  if (c.error) {
+    table = '<div class="card-pad"><p class="error-line">' + icon('alert') + 'Jira ist gerade nicht erreichbar: ' + e(c.error) + '</p></div>';
+  } else if (!c.rows.length) {
+    table = '<div class="card-pad"><p class="empty">Kein Ticket passt zu diesen Filtern. Suche kürzer formulieren oder Filter zurücksetzen.</p></div>';
+  } else {
+    table = `<div class="table-wrap">
+    <table class="table table--fixed table--cards">
+      <thead><tr><th class="t-key">Ticket</th><th class="t-title">Titel</th><th class="t-stream hide-sm">Stream</th><th class="t-phase">Phase</th><th class="t-date r">Bewegt</th></tr></thead>
+      <tbody>
+      ${each(c.rows, function (i) {
+        return `
+        <tr>
+          <td class="t-key"><a class="key" href="${e(i.url)}" target="_blank" rel="noopener">${e(i.key)}</a></td>
+          <td><a class="cell-title" href="${e(i.url)}" target="_blank" rel="noopener">${e(i.summary)}</a><span class="cell-sub">${e(i.description)}</span></td>
+          <td class="t-meta"><span class="cell-sub hue-${e(hue(i.stream))}" style="color: var(--text); font-size: 13px"><span class="sdot"></span>${i.board_scope === 'adfcr' ? 'ADFCR · Country Report' : e(stream_label(i.stream))}</span>${i.epic ? '<span class="cell-sub">' + e(i.epic) + '</span>' : ''}</td>
+          <td><span class="pill pill--${phase_tone(i.status)} t-meta">${e(phase_label(i.status))}</span></td>
+          <td class="r muted num t-meta">${e(relative_day(i.updated))}</td>
+        </tr>`;
+      })}
+      </tbody>
+    </table>
+  </div>`;
+  }
+  var content = `<div class="fitwrap">
+<div class="page-head">
+  <div>
+    <p class="page-sub"><strong class="num">${e(c.matched === undefined ? c.rows.length : c.matched)}</strong> von ${e(c.total)} Vorgängen aus vier ADL-Streams und ADFCR, nur lesend aus Jira.</p>
+  </div>
+  <div class="page-actions"><a class="btn btn--primary" href="${u('/ticket')}">${icon('plus')}Ticket erstellen</a></div>
+</div>
+<div class="pane">
+
+<nav class="chips board-tabs" aria-label="Board auswählen">
+  <a class="chip${!c.scope ? ' on' : ''}" href="${u('/tickets?' + query({ q: c.q, phase: c.phase }))}">Alle</a>
+  ${each(c.scopes, function (s) { return '<a class="chip' + (c.scope === s.id ? ' on' : '') + '" href="' + u('/tickets?' + query({ scope: s.id, q: c.q, phase: c.phase })) + '">' + e(s.label) + '</a>'; })}
+</nav>
+
+<form class="filters" action="/tickets" method="get">
+  ${c.epic ? '<input type="hidden" name="epic" value="' + e(c.epic) + '">' : ''}
+  <div class="field field--grow">
+    <label class="field-label" for="f-q">Suche</label>
+    <input class="control" id="f-q" name="q" type="search" value="${e(c.q)}" placeholder="Schlüssel, Titel oder Text">
+  </div>
+  <div class="field">
+    <label class="field-label" for="f-stream">Board / Stream</label>
+    <select class="control" id="f-stream" name="scope" data-autosubmit>
+      <option value="">Alle</option>
+      ${each(c.scopes, function (s) { return '<option value="' + e(s.id) + '"' + (s.id === c.scope ? ' selected' : '') + '>' + e(s.label) + '</option>'; })}
+    </select>
+  </div>
+  <div class="field">
+    <label class="field-label" for="f-phase">Phase</label>
+    <select class="control" id="f-phase" name="phase" data-autosubmit>
+      <option value="">Alle Phasen</option>
+      ${each(c.phases, function (p) { return '<option value="' + e(p) + '"' + (p === c.phase ? ' selected' : '') + '>' + e(phase_label(p)) + '</option>'; })}
+    </select>
+  </div>
+  <button class="btn btn--secondary" type="submit">${icon('search')}Suchen</button>
+  ${c.q || c.scope || c.phase ? '<a class="btn btn--ghost" href="' + u('/tickets') + '">Zurücksetzen</a>' : ''}
+</form>
+${c.epic ? '<p class="epic-filter-notice">Epic <strong class="mono">' + e(c.epic) + '</strong> <a href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase })) + '">Epic-Filter entfernen</a></p>' : ''}
+
+<section class="card card--flush" aria-label="Tickets">
+  ${table}
+  ${c.matched > c.rows.length ? '<div class="table-more"><span class="num">1–' + e(c.rows.length) + ' von ' + e(c.matched) + '</span>' + (c.more > 0 ? '<a class="btn btn--secondary" href="' + u('/tickets?' + query({ scope: c.scope, q: c.q, phase: c.phase, epic: c.epic, limit: c.limit + c.page_size })) + '">Weitere ' + e(c.more) + ' laden</a>' : '<span>Suche oder Filter eingrenzen, um weitere zu sehen</span>') + '</div>' : ''}
+</section>
+</div>
+</div>`;
+  return layout(c, t('Alle Tickets'), ' fit', content);
+};
+
+// ---------------------------------------------------------------- Neue Anforderung (ticket.html)
+
+function req() { return '<span class="req" aria-hidden="true">*</span>'; }
+
+function maskRow(label, value, required, wide, missing) {
+  missing = missing || 'fehlt';
+  return `
+<div class="ov${wide ? ' ov--wide' : ''}">
+  <dt>${e(label)}${required ? req() : ''}</dt>
+  <dd${!value && required ? ' class="is-missing"' : ''}>${value ? e(value) : required ? e(missing) : '–'}</dd>
+</div>
+`;
+}
+
+TEMPLATES.ticket = function (c) {
+  var result = c.result;
+  var f = result ? result.form : c.blank;
+  var chat = c.chat || [];
+  var msgs = each(chat, function (m, n) {
+    var lastOne = n === chat.length - 1;
+    var out = '\n      <div class="m u">' + e(m) + '</div>\n      ';
+    if (lastOne && result) {
+      out += '<div class="m a">' + e(c.reply) + '<ul class="steps2"><li>✓ ' + e(t('User Story formuliert')) + '</li><li>✓ ' + e(t('Mit Jira und Confluence abgeglichen')) +
+        '</li><li>✓ ' + e(t('Betroffene Streams geprüft')) + '</li><li>✓ ' + e(t('Epic vorgeschlagen')) + '</li></ul></div>';
+    } else if (!lastOne) {
+      out += '<div class="m a">' + e(t('Maske aktualisiert.')) + '</div>';
+    }
+    return out;
+  });
+
+  var mask;
+  if (!result) {
+    mask = '<p class="emp" style="padding: 24px 8px">' + e(t('Noch leer. Sobald du im Chat schreibst, erscheint hier der Vorschlag, eingepflegt in die Maske.')) + '</p>';
+  } else {
+    var miss = t('fehlt');
+    var story = f.role && f.goal ? t('Als') + ' ' + f.role + ' ' + t('möchte ich') + ' ' + f.goal + (f.benefit ? ', ' + t('damit') + ' ' + f.benefit : '') : '';
+    mask = '<dl class="ovgrid">' +
+      maskRow(t('Titel'), f.title, true, true, miss) +
+      maskRow(t('User Story'), story, true, true, miss) +
+      maskRow(t('Ausgangssituation'), f.current_state, true, false, miss) +
+      maskRow(t('Soll-Zustand'), f.target_state) +
+      maskRow(t('Akzeptanzkriterien'), result.form_criteria_list.join(' · '), true, false, miss) +
+      maskRow(t('Betroffene Prozesse'), f.affected) +
+      maskRow('Stream', f.stream ? stream_label(f.stream) : '', true, false, miss) +
+      maskRow('Epic', f.epic === c.new_epic ? t('Neues Epic') + ': ' + f.new_epic : f.epic) +
+      maskRow(t('Land') + ' · ' + t('Priorität'), f.country + ' · ' + f.priority, true, false, miss) +
+      maskRow(t('Zeitersparnis'), f.time_saved ? f.time_saved + ' ' + t('PT/Jahr') : '') +
+      '</dl>' +
+      (!result.advice.agrees ? '<p class="bn w" style="margin: 12px 0 0">' + e(t('Ist das wirklich')) + ' ' + e(result.advice.chosen) + '? ' + e(t('Die Prüfung empfiehlt')) + ' ' + e(result.advice.recommended) + '.</p>' : '') +
+      (result.created ? '<p class="bn i" style="margin: 12px 0 0">' + e(t('Angelegt als')) + ' <strong class="mono2">' + e(result.created) + '</strong>.</p>' : '');
+  }
+
+  var matchCount = result ? result.duplicates.filter(function (d) { return d.hit.source === 'jira'; }).length : 0;
+  var multi = result && result.classification.multi_stream;
+  var triggerLabel = matchCount ? 'Ähnliche Inhalte prüfen' : multi ? 'Aufteilung in mehrere Streams prüfen'
+    : result && result.duplicates_error ? 'Quellenprüfung nicht verfügbar' : result ? 'Ergebnis der Quellenprüfung' : 'Ähnliche Tickets und Quellen';
+
+  var review;
+  if (!result) {
+    review = '<p class="emp" style="padding: 16px 8px">' + e(t('Hier stehen passende Tickets und Seiten aus Jira und Confluence.')) + '</p>';
+  } else {
+    review = '';
+    if (multi) {
+      review += '<div class="bn i"><strong>Aufteilung prüfen</strong><p>' + e(t('Mehrere Streams betroffen. Pro Stream braucht es ein eigenes Ticket:')) + '</p>\n        <ul>' +
+        each(result.classification.split_proposal, function (part) { return '<li><strong>' + e(stream_label(part.stream.id)) + ':</strong> ' + e(part.text) + '</li>'; }) +
+        '</ul><p class="review-note">Der Stream-Vorschlag ist vorläufig. Gleiche die fachliche Zuständigkeit mit den unten verlinkten Jira- und Confluence-Inhalten ab.</p>\n      </div>';
+    }
+    review += '<h3 class="review-section-title">Bestehende Anforderung ergänzen</h3>';
+    review += each(result.likely_duplicates, function (d) {
+      return '<div class="bn w">' + e(t('Mögliches Duplikat')) + ' (' + percent(d.hit.score) + ' %): <a href="' + e(d.hit.url) + '" target="_blank" rel="noopener" style="text-decoration: underline">' +
+        e(d.hit.title) + '</a>. ' + e(t('Ergänze dort lieber, statt ein neues Ticket anzulegen.')) + '</div>';
+    });
+    if (result.likely_duplicates.length) {
+      review += '<p class="review-note">Zusammenführungsvorschlag: Prüfe, ob Ziel, Umfang und Akzeptanzkriterien übereinstimmen. Ergänze fehlende Kriterien im vorhandenen Ticket und verlinke diese Anforderung. Es wird hier nichts automatisch zusammengeführt.</p>';
+    }
+    if (result.duplicates_error) {
+      review += '<p class="emp">' + e(t('Die Prüfung ist gerade nicht möglich:')) + ' ' + e(result.duplicates_error) + '</p>';
+    } else if (!result.duplicates.length) {
+      review += '<p class="emp">' + e(t('Nichts Ähnliches gefunden. Das Thema scheint neu zu sein.')) + '</p>';
+    }
+    review += each(result.duplicates, function (d) {
+      return `
+      <div class="hit2${d.level === 'duplicate' ? ' dup' : ''}">
+        <b class="num">${percent(d.hit.score)} %</b>
+        <div><a href="${e(d.hit.url)}" target="_blank" rel="noopener">${e(d.hit.title)}</a>${d.hit.snippet ? '<p class="review-snippet">' + e(d.hit.snippet) + '</p>' : ''}<i>${e(source_label(d.hit.source))} · ${d.level === 'duplicate' ? e(t('wahrscheinlich Duplikat')) : e(t('ähnlich'))}</i></div>
+        <span class="faint">${icon('external', 'ic ic-sm')}</span>
+      </div>`;
+    });
+  }
+
+  var verlauf = each(chat, function (m) { return '<input type="hidden" name="verlauf" value="' + e(m) + '">'; });
+  var hasStream = result && f.stream;
+  var epicOptions = '<option value="">' + (hasStream ? e(t('Bitte wählen')) : e(t('Erst Stream wählen und prüfen'))) + '</option>';
+  if (result) {
+    epicOptions += each(result.epic_options, function (o) { return '<option value="' + e(o[0]) + '"' + (o[0] === f.epic ? ' selected' : '') + '>' + e(o[1]) + '</option>'; });
+    if (result.may_create_epic && f.stream) {
+      epicOptions += '<option value="' + e(c.new_epic) + '"' + (f.epic === c.new_epic ? ' selected' : '') + '>' + e(t('Neues Epic vorschlagen (nur INT)')) + '</option>';
+    }
+  }
+
+  var content = `<div class="ix">
+
+<div class="tgrid requirement-workspace">
+  <section class="c chatcard requirement-chat" aria-labelledby="chat-title">
+    <div class="hd" style="margin-bottom: 12px">
+      <h2 id="chat-title" style="margin: 0">${e(t('KI-Formulierungshilfe'))}</h2>
+
+    </div>
+    <div class="msgs sm" aria-live="polite">
+      <div class="m a">${e(t('Beschreib in eigenen Worten, was sich ändern soll und wie es heute ist. Ich fülle die Maske rechts aus und prüfe Jira und Confluence auf Ähnliches.'))}</div>${msgs}
+    </div>
+    ${!chat.length ? '<div class="chips" style="margin-top: 10px">' + each(c.examples, function (ex, n) { return '<a class="chip" href="' + u('/ticket?beispiel=' + n) + '">' + e(t(ex[0])) + '</a>'; }) + '</div>' : ''}
+    <form class="ci" action="/ticket" method="post" data-chat>
+      ${verlauf}
+      <input type="hidden" name="country" value="${e(f.country)}">
+      <label class="sr-only" for="t-text">${e(t('Nachricht an die Formulierungshilfe'))}</label>
+      <textarea id="t-text" name="text" rows="1" placeholder="${chat.length ? e(t('Etwas ergänzen, zum Beispiel wie es heute läuft')) : e(t('Was soll sich ändern, und warum?'))}" required></textarea>
+      <button class="chat-send" type="submit" aria-label="${e(t('Nachricht senden'))}" title="${e(t('Nachricht senden'))}">${icon('arrow')}</button>
+    </form>
+    ${c.error ? '<p class="kl" style="color: var(--rd)">' + e(t(c.error)) + '</p>' : ''}
+  </section>
+
+  <div class="tright">
+    <section class="c scroll-card mask-card" aria-labelledby="mask-title">
+      <div class="hd" style="margin-bottom: 12px">
+        <h2 id="mask-title" style="margin: 0">${e(t('Vorgabemaske'))}</h2>
+        <button class="s" type="button" data-dialog-open="mask-dialog" style="margin: 0">${e(t('Details bearbeiten'))}</button>
+      </div>
+      <div class="mask-scroll">
+      ${mask}
+      </div>
+      <div class="mask-foot">
+        <a class="btn2 l" href="${u('/ticket')}" data-reload>${e(t('Verwerfen'))}</a>
+        <span class="mask-state" id="m-blocked">${result ? (result.blocked ? e(t(result.blocked)) : e(t('Bereit zum Einreichen.'))) : ''}</span>
+        ${result && result.likely_duplicates.length ? '<label class="ck mask-ack"><input type="checkbox" name="reviewed" value="1" form="mask"' + (f.reviewed ? ' checked' : '') + '>' + e(t('Duplikat geprüft')) + '</label>' : ''}
+        <button class="btn2" type="submit" form="mask" name="action" value="anlegen"${!result || result.blocked ? ' disabled aria-describedby="m-blocked"' : ''}>${e(t('Einreichen'))}</button>
+      </div>
+    </section>
+
+    <button class="requirement-review-trigger${(result && result.duplicates.length) || multi ? ' has-warning' : ''}" type="button" data-dialog-open="review-dialog" aria-haspopup="dialog" aria-controls="review-dialog">
+      <span>${icon('alert')} ${triggerLabel}</span>
+      <span class="review-count" aria-label="${matchCount} ähnliche Jira-Tickets">${matchCount}</span>
+    </button>
+  </div>
+</div>
+</div>
+
+<dialog class="dlg review-dialog" id="review-dialog" aria-labelledby="hits-title">
+<div class="dlg-head hd"><h2 id="hits-title">Ähnliche Inhalte und Stream-Zuordnung</h2><button class="icon-btn" type="button" data-dialog-close aria-label="Schließen">${icon('close')}</button></div>
+<div class="dlg-body review-body">
+<p class="review-intro">Prüfe die Quellen, bevor du einen weiteren Vorgang anlegst. Ähnlichkeit ist ein Hinweis, kein Nachweis für ein Duplikat.</p>
+      ${review}
+</div><div class="dlg-foot"><button class="btn2" type="button" data-dialog-close>Zurück zur Anforderung</button></div></dialog>
+
+<dialog class="dlg" id="mask-dialog" aria-labelledby="dlg-title">
+  <form id="mask" class="ix" action="/ticket/pruefen" method="post">
+    <div class="hd dlg-head">
+      <h2 id="dlg-title" style="margin: 0">${e(t('Formulierungen anpassen'))}</h2>
+      <button class="icon-btn" type="button" data-dialog-close aria-label="${e(t('Schließen'))}">${icon('close')}</button>
+    </div>
+    <input type="hidden" name="source_text" value="${e(f.source_text)}">
+    <input type="hidden" name="open_questions" value="${e((f.open_questions || []).join('\n'))}">
+    <input type="hidden" name="ai" value="${f.ai ? '1' : '0'}">
+    <input type="hidden" name="markup" value="${e(result ? result.markup : '')}">
+    <input type="hidden" name="background" value="${e(f.background)}">
+    ${verlauf}
+    <div class="dlg-body">
+      <div class="pair2">
+        <div class="span2"><label for="m-title">${e(t('Titel'))}${req()}</label><input id="m-title" name="title" value="${e(f.title)}" maxlength="120"></div>
+        <div><label for="m-role">${e(t('Als (Rolle)'))}${req()}</label><input id="m-role" name="role" value="${e(f.role)}"></div>
+        <div><label for="m-benefit">${e(t('damit (Mehrwert)'))}${req()}</label><input id="m-benefit" name="benefit" value="${e(f.benefit)}"></div>
+        <div class="span2"><label for="m-goal">${e(t('möchte ich (Ziel)'))}${req()}</label><textarea id="m-goal" name="goal" class="short" rows="2">${e(f.goal)}</textarea></div>
+        <div><label for="m-current">${e(t('Ausgangssituation: wie ist es heute?'))}${req()}</label><textarea id="m-current" name="current_state" class="short" rows="3">${e(f.current_state)}</textarea></div>
+        <div><label for="m-target">${e(t('Soll-Zustand'))}</label><textarea id="m-target" name="target_state" class="short" rows="3">${e(f.target_state)}</textarea></div>
+        <div><label for="m-criteria">${e(t('Akzeptanzkriterien'))}${req()} <span style="font-weight: 400">· ${e(t('eins pro Zeile'))}</span></label><textarea id="m-criteria" name="criteria" rows="3">${e(f.criteria)}</textarea></div>
+        <div><label for="m-links">Links <span style="font-weight: 400">· ${e(t('eins pro Zeile'))}</span></label><textarea id="m-links" name="links" rows="3">${e(f.links)}</textarea></div>
+        <div><label for="m-affected">${e(t('Betroffene Prozesse'))}</label><input id="m-affected" name="affected" value="${e(f.affected)}"></div>
+        <div><label for="m-saved">${e(t('Zeitersparnis (PT/Jahr)'))}</label><input id="m-saved" name="time_saved" type="number" min="0" value="${e(f.time_saved)}"></div>
+        <div><label for="m-country">${e(t('Land'))}${req()}</label><select id="m-country" name="country">${each(c.countries, function (x) { return '<option' + (x === f.country ? ' selected' : '') + '>' + e(x) + '</option>'; })}</select></div>
+        <div><label for="m-stream">Stream${req()}</label>
+          <select id="m-stream" name="stream">
+            <option value="">${e(t('Bitte wählen'))}</option>
+            ${each(c.streams, function (s) { return '<option value="' + e(s.id) + '"' + (s.id === f.stream ? ' selected' : '') + '>' + e(stream_label(s.id)) + (result ? ' · ' + e(result.stream_confidence[s.id] || 0) + ' %' : '') + '</option>'; })}
+          </select></div>
+        <div><label for="m-epic">${e(t('Epic (KI-Vorschlag)'))}</label>
+          <select id="m-epic" name="epic"${!hasStream ? ' disabled' : ''}>
+            ${epicOptions}
+          </select></div>
+        <div><label for="m-newepic">${e(t('Titel des neuen Epics'))}</label><input id="m-newepic" name="new_epic" value="${e(f.new_epic)}"></div>
+        <div><label for="m-safety">${e(t('Prozesssicherheit'))}</label><select id="m-safety" name="safety">${each(c.safety, function (o) { return '<option value="' + e(o) + '"' + (o === f.safety ? ' selected' : '') + '>' + e(t(o)) + '</option>'; })}</select></div>
+        <div><label for="m-scale">${e(t('Skalierung'))}</label><select id="m-scale" name="scale">${each(c.scales, function (o) { return '<option' + (o === f.scale ? ' selected' : '') + '>' + e(o) + '</option>'; })}</select></div>
+        <div class="span2">
+          <p id="m-prio-l" class="field-label" style="margin: 14px 0 6px; color: var(--muted)">${e(t('Priorität'))}${req()}</p>
+          <div class="seg2" role="radiogroup" aria-labelledby="m-prio-l">
+            ${each(c.priorities, function (p, n) { return '<input type="radio" id="prio-' + (n + 1) + '" name="priority" value="' + e(p) + '"' + (p === f.priority ? ' checked' : '') + '><label for="prio-' + (n + 1) + '">' + e(p) + '</label>'; })}
+          </div>
+        </div>
+      </div>
+      ${result ? '<textarea id="m-markup" class="sr-only" readonly tabindex="-1" aria-hidden="true">' + e(result.markup) + '</textarea>' : ''}
+    </div>
+    <div class="dlg-foot">
+      ${result ? '<button class="btn2 l" type="button" data-copy="m-markup"><span>' + e(t('Jira-Text kopieren')) + '</span></button>\n      <button class="btn2 l" type="submit" formaction="/ticket/text">' + e(t('Als Datei')) + '</button>' : ''}
+      <span class="spacer2"></span>
+      <button class="btn2 l" type="button" data-dialog-close>${e(t('Abbrechen'))}</button>
+      <button class="btn2" type="submit" name="action" value="pruefen">${e(t('Übernehmen und prüfen'))}</button>
+    </div>
+  </form>
+</dialog>`;
+  return layout(c, t('Neue Anforderung'), ' fit', content);
+};
+
+// ---------------------------------------------------------------- Meine Tickets (my_tickets.html)
+
+TEMPLATES.my_tickets = function (c) {
+  var head = '';
+  if (c.error) head = '<div class="c"><p class="emp">Jira ist gerade nicht erreichbar: ' + e(c.error) + '</p></div>';
+  else if (!c.rows.length) head = '<div class="c"><p class="emp">Du hast noch kein Ticket angelegt.<br><br><a class="btn2" href="' + u('/ticket') + '">' + e(t('Erstes Ticket erstellen')) + '</a></p></div>';
+  var cards = each(c.rows, function (r) {
+    var i = r.issue;
+    var n = track_step(i.status);
+    var body;
+    if (upper(i.status) === 'REJECTED') {
+      body = '<p class="kl" style="margin: 14px 0 0"><b style="color: var(--text)">' + e(t('Abgelehnt.')) + '</b> Die Begründung steht im Ticket in Jira.</p>';
+    } else {
+      body = '<div class="tl" role="list" aria-label="Schritt ' + (n + 1) + ' von ' + TRACK.length + '" style="--p: ' + (n / (TRACK.length - 1)) + '">\n    ' +
+        each(TRACK, function (p, k) {
+          return '<div role="listitem" class="' + (k < n ? 'd' : k === n ? 'n' : '') + '"' + (k === n ? ' aria-current="step"' : '') + '><span>' + e(p) + '</span></div>';
+        }) + '\n  </div>\n  <p class="kl" style="margin: 0"><b style="color: var(--text)">' + e(t('Nächster Schritt:')) + '</b> ' +
+        (upper(i.status) === 'DONE' ? e(t('Erledigt.')) : e(NEXT_STEP[n])) + '</p>' +
+        (upper(i.status) === 'ON HOLD DM' ? '\n  <div class="bn w" style="margin: 12px 0 0">Rückfrage von DM wartet auf dich. <a class="s" href="' + e(i.url) + '" target="_blank" rel="noopener">' + e(t('Antworten')) + '</a></div>' : '');
+    }
+    return `
+<div class="c" style="margin-bottom: 16px">
+  <div class="hd ticket-hd">
+    <div>
+      <a href="${e(i.url)}" target="_blank" rel="noopener"><b style="font-size: 17px">${e(i.summary)}</b></a>
+      <div class="kl"><span class="mono2">${e(i.key)}</span> · <span class="tag hue-${e(hue(i.stream))}">${e(stream_label(i.stream))}</span>${i.epic ? ' <span class="pill">' + e(i.epic) + '</span>' : ''}</div>
+    </div>
+    <span class="pill ${pill_tone(i.status)}">${e(phase_label(i.status))}</span>
+  </div>
+  ${body}
+</div>`;
+  });
+  return layout(c, t('Meine Tickets'), ' fit', '<div class="ix">\n<div class="pane">\n\n' + head + cards + '\n</div>\n</div>');
+};
+
+// ---------------------------------------------------------------- Admin (admin.html)
+
+TEMPLATES.admin = function (c) {
+  var inner;
+  if (!c.allowed) {
+    inner = '<div class="c"><p class="emp">' + e(t('Diese Seite ist der Rolle INT vorbehalten.')) + '</p></div>';
+  } else {
+    var staleRows = c.stale.length ? each(c.stale, function (s) {
+      var i = s.issue;
+      return '<div class="gp"><b>' + e(i.key) + '</b> <a href="' + e(i.url) + '" target="_blank" rel="noopener">' + e(i.summary) + '</a><i>' + e(phase_label(i.status)) +
+        ' · seit ' + e(s.age) + ' Tagen unverändert · ' + e(stream_label(i.stream)) + '</i></div>';
+    }) : (!c.error ? '<p class="emp">Kein Ticket hängt länger als ' + e(c.stale_days) + ' Tage.</p>' : '');
+    inner = `<div class="g4">
+  <div class="c"><div class="k num">${e(c.total)}</div><div class="kl">${e(t('Tickets im Pilot'))}</div></div>
+  <div class="c"><div class="k num">${e(c.stale.length)}</div><div class="kl">Seit über ${e(c.stale_days)} Tagen On Hold</div></div>
+  <div class="c"><div class="k num">${e(c.rejected)}</div><div class="kl">${e(t('Abgelehnt'))}</div></div>
+  <div class="c"><div class="k num">${e(c.streams)}</div><div class="kl">${e(t('Aktive Streams'))}</div></div>
+</div>
+<div class="c">
+  <h2>${e(t('Tickets mit Handlungsbedarf'))}</h2>
+  ${c.error ? '<p class="emp">Jira ist gerade nicht erreichbar: ' + e(c.error) + '</p>' : ''}
+  ${staleRows}
+</div>
+<div class="c" style="margin-top: 16px">
+  <h2>${e(t('Verbindungen'))}</h2>
+  ${each(c.checks, function (ch) { return '<div class="gp"><b style="color: ' + (ch[1] ? 'var(--ok)' : 'var(--rd)') + '">' + (ch[1] ? '✓' : '✗') + '</b> <b>' + e(ch[0]) + '</b><i>' + e(ch[2]) + '</i></div>'; })}
+</div>`;
+  }
+  return layout(c, t('Admin'), ' fit', '<div class="ix">\n<div class="pane">\n' + inner + '\n</div>\n</div>');
+};
+
+// ---------------------------------------------------------------- Assistent (knowledge.html)
+
+TEMPLATES.knowledge = function (c) {
+  var turns = each(c.turns, function (ta) {
+    return '\n    <div class="m u">' + e(ta[0]) + '</div>\n    <div class="m a">' + e(ta[1]) + '</div>\n    <input type="hidden" name="f" value="' + e(ta[0]) + '"><input type="hidden" name="a" value="' + e(ta[1]) + '">';
+  });
+  var current = '';
+  if (c.frage) {
+    current = '\n    <div class="m u">' + e(c.frage) + '</div>\n    ';
+    if (c.error) {
+      current += '<div class="m a">Das hat nicht geklappt: ' + e(c.error) + '</div>';
+    } else if (c.answer) {
+      var a = c.answer;
+      current += '<div class="m a">' + (a.notice ? e(a.notice) + '\n\n' : '') + e(a.text) +
+        (c.shown_sources.length ? '<div class="srcs">' + each(c.shown_sources, function (s) {
+          return '<a class="src' + (s.source !== 'jira' ? ' c' : '') + '" href="' + e(s.url || '#') + '"' + (s.url ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + e(source_label(s.source)) + ' · ' + e(s.title) + '</a>';
+        }) + '</div>' : '') +
+        '<button class="s" type="submit" formaction="/ticket" name="text" value="' + e(c.frage) + '">' + e(t('Ticket daraus erstellen')) + '</button></div>\n    ' +
+        '<input type="hidden" name="f" value="' + e(c.frage) + '"><input type="hidden" name="a" value="' + e(a.text) + '">';
+    }
+  }
+  var content = `<div class="ix">
+<div class="pane pane--fill">
+
+<form class="c chatcard knowledge-chat" action="/wissen" method="post" data-chat>
+  <div class="hd knowledge-head">
+    <div class="knowledge-heading"><span class="knowledge-kicker">${e(String(c.app_name).toUpperCase())} · KNOWLEDGE ASSISTANT</span><h2>${e(t('Jira & Confluence durchsuchen'))}</h2><p>Fragen stellen, bestehende Lösungen finden und Quellen direkt prüfen.</p></div>
+    <div class="knowledge-source-filter"><span class="knowledge-filter-label">Quellen auswählen</span><div class="chips" role="group" aria-label="Quellen">
+      ${each([['jira', 'Jira'], ['confluence', 'Confluence']], function (kv) {
+        return '\n      <input class="sr-only" type="checkbox" id="q-' + kv[0] + '" name="quelle" value="' + kv[0] + '"' + (c.quellen.indexOf(kv[0]) >= 0 ? ' checked' : '') + '>\n      <label class="chip" for="q-' + kv[0] + '" style="margin: 0; cursor: pointer">' + kv[1] + '</label>\n      ';
+      })}
+    </div></div>
+  </div>
+
+  <div class="msgs" aria-live="polite">
+    <div class="m a">${e(t('Hallo! Ich finde relevante Jira-Tickets, Confluence-Seiten und bestehende Lösungen. Stelle eine Frage oder nutze einen Vorschlag unten.'))}</div>${turns}${current}
+  </div>
+
+  <div class="knowledge-suggestions"><span class="knowledge-filter-label">Beispielfragen</span><div class="chips">
+    ${each(c.questions, function (q) { return '<button class="chip" type="submit" name="frage" value="' + e(q) + '">' + e(q) + '</button>'; })}
+  </div></div>
+  <div class="ci">
+    <label class="sr-only" for="ci">${e(t('Frage'))}</label>
+    <textarea id="ci" name="frage" rows="1" placeholder="${e(t('Frag nach Tickets, Epics oder Leitfäden …'))}"></textarea>
+    <button class="chat-send" type="submit" aria-label="Frage senden" title="Frage senden">${icon('arrow')}</button>
+  </div>
+</form>
+</div>
+</div>`;
+  return layout(c, t('Assistent'), ' fit', content);
+};
+
+// ---------------------------------------------------------------- Bug-Ursache (bugs.html)
+
+TEMPLATES.bugs = function (c) {
+  var bug = c.bug, result = c.result;
+  var body;
+  if (c.error && !c.leads.length) {
+    body = '<section class="card"><p class="error-line">' + icon('alert') + 'ServiceNow ist gerade nicht erreichbar: ' + e(c.error) + '</p></section>';
+  } else if (!c.leads.length) {
+    body = '<section class="card"><p class="empty">Kein offener Bug in ServiceNow.</p></section>';
+  } else {
+    var list = each(c.leads, function (b) {
+      var sel = bug && b.number === bug.number;
+      return `
+      <li>
+        <a class="row-link${sel ? ' is-selected' : ''}" href="${u('/bugs/' + encodeURIComponent(b.number))}"${sel ? ' aria-current="page"' : ''}>
+          <span class="row-main">
+            <span class="row-title">${e(b.title)}</span>
+            <span class="row-sub"><span class="mono">${e(b.number)}</span> · ${e(short_date(b.first_seen))}</span>
+          </span>
+          ${b.severity === 'high' ? '<span class="pill pill--negative">' + e(priority_short(b.priority)) + '</span>' : ''}
+        </a>
+      </li>`;
+    });
+    var detail;
+    if (bug) {
+      var rca;
+      if (result && result.candidates.length) {
+        var top = result.candidates[0];
+        var more = '';
+        if (result.candidates.length > 1) {
+          more = `
+      <p class="section-title" style="margin-top: 18px; margin-bottom: 6px">Weitere Kandidaten</p>
+      <div class="table-wrap" style="margin: 0 calc(-1 * var(--card-pad))">
+        <table class="table table--fixed table--cards">
+          <thead><tr><th>Change</th><th style="width: 130px" class="hide-sm">Ausgerollt</th><th style="width: 150px" class="hide-sm">Autor</th><th style="width: 130px" class="r">Konfidenz</th></tr></thead>
+          <tbody>
+          ${each(result.candidates.slice(1), function (cand) {
+            var days = day_number(D(bug.first_seen)) - day_number(D(cand.change.deployed_at));
+            return `
+            <tr>
+              <td><a class="cell-title" href="${e(cand.change.url)}" target="_blank" rel="noopener">${e(cand.change.title)}</a><span class="cell-sub"><span class="mono">${e(cand.change.id)}</span> · ${e(cand.reasons[0])}</span></td>
+              <td class="muted num t-meta">${e(short_date(cand.change.deployed_at))}<span class="cell-sub">${days === 0 ? 'am selben Tag' : days === 1 ? '1 Tag davor' : e(days) + ' Tage davor'}</span></td>
+              <td class="muted t-meta">${e(cand.change.author)}</td>
+              <td class="r"><span class="conf"><span class="conf-track"><span style="width: ${percent(cand.confidence)}%"></span></span><span class="conf-v">${percent(cand.confidence)} %</span></span></td>
+            </tr>`;
+          })}
+          </tbody>
+        </table>
+      </div>`;
+        }
+        rca = `
+      <div class="lead-change">
+        <div style="min-width: 0">
+          <p class="mono muted">${e(top.change.id)}${top.change.release ? ' · Release ' + e(top.change.release) : ''}</p>
+          <p style="font-weight: 600; font-size: 16px; margin-top: 2px"><a href="${e(top.change.url)}" target="_blank" rel="noopener">${e(top.change.title)}</a></p>
+          <ul class="reasons">${each(top.reasons, function (r) { return '<li>' + e(r) + '</li>'; })}</ul>
+        </div>
+        <div style="text-align: right; flex: none">
+          <div class="ring" style="--p: ${percent(top.confidence)}; margin-left: auto"><span class="num">${percent(top.confidence)} %</span></div>
+          <p class="muted" style="font-size: 12px; margin-top: 6px">Konfidenz${!result.conclusive ? ', nicht eindeutig' : ''}</p>
+        </div>
+      </div>
+${more}`;
+      } else {
+        rca = '\n      <p class="empty">Kein Change passt zeitlich und fachlich zu diesem Bug. Möglich sind eine Datenursache oder eine Änderung außerhalb von ServiceNow.</p>';
+      }
+      var people = result && result.people.length ? `
+    <section class="card" aria-labelledby="pp-title">
+      <div class="card-head">
+        <h2 class="card-title" id="pp-title">${e(t('Ansprechpersonen'))}</h2>
+        <span class="card-meta">Autoren der Kandidaten, gewichtet nach Konfidenz</span>
+      </div>
+      <ul class="bars">
+        ${each(result.people, function (p) {
+          return `
+        <li class="bar-row">
+          <span class="name">${e(p[0])}</span><span class="v num">${percent(p[1])} %</span>
+          <span class="bar-track" aria-hidden="true"><span style="width: ${percent(p[1])}%"></span></span>
+        </li>`;
+        })}
+      </ul>
+    </section>` : '';
+      detail = `
+  <div class="stack">
+    <section class="card" aria-labelledby="bug-title">
+      <div class="card-head">
+        <h2 class="card-title" id="bug-title"><span class="chip-ic hue-rose">${icon('bug')}</span>${e(bug.short_description)}</h2>
+        <a class="link" href="${e(bug.url)}" target="_blank" rel="noopener">In ServiceNow ${icon('external', 'ic ic-sm')}</a>
+      </div>
+      <dl class="kv">
+        <dt>Bug</dt><dd><span class="mono">${e(bug.number)}</span>${bug.priority ? ' <span class="pill' + (c.severity === 'high' ? ' pill--negative' : '') + '">' + e(bug.priority) + '</span>' : ''}</dd>
+        <dt>Komponente</dt><dd>${e(bug.component)}</dd>
+        <dt>Zuerst aufgetreten</dt><dd class="num">${e(full_date_time(bug.first_seen))}</dd>
+        <dt>Beschreibung</dt><dd class="muted">${e(bug.description)}</dd>
+      </dl>
+    </section>
+
+    <section class="card rca-card" aria-labelledby="rca-title">
+      <div class="card-head">
+        <h2 class="card-title" id="rca-title"><span class="chip-ic hue-blue">${icon('spark')}</span>${e(t('Wahrscheinliche Ursache'))}</h2>
+        <span class="card-meta">Changes der letzten 21 Tage vor dem Auftreten</span>
+      </div>
+      ${rca}
+    </section>
+
+    <button class="btn2 rca-explain-open" type="button" data-dialog-open="rca-dialog">Detaillierte Ursachen-Erklärung ${icon('spark')}</button>
+    ${people}
+  </div>`;
+    } else {
+      detail = '\n  <section class="card"><p class="empty">' + e(c.error || 'Diesen Bug gibt es in ServiceNow nicht.') + '</p></section>';
+    }
+    body = `<div class="split">
+  <section class="card card--flush" aria-labelledby="bl-title">
+    <div class="card-head"><h2 class="card-title" id="bl-title">${e(t('Offene Bugs'))}<span class="count num">${e(c.leads.length)}</span></h2></div>
+    <ul class="rows bug-list">
+      ${list}
+    </ul>
+  </section>
+${detail}
+</div>`;
+  }
+  var dialog = '';
+  if (bug) {
+    dialog = '<dialog class="dlg rca-dialog" id="rca-dialog" aria-labelledby="rca-dialog-title">\n<div class="dlg-head"><h2 id="rca-dialog-title">Ursachen-Erklärung · ' + e(bug.number) +
+      '</h2><button class="icon-btn" type="button" data-dialog-close aria-label="Schließen">' + icon('close') + '</button></div>\n<div class="dlg-body"><p>Die Erklärung bewertet vorhandene Befunde. Sie bestätigt keine Ursache und weist niemandem Schuld zu.</p>' +
+      (result && result.candidates.length ? '<p class="review-note">Die Rangfolge beruht auf Komponentenübereinstimmung, zeitlichem Abstand und Textähnlichkeit. Konfidenzen sind keine kalibrierten Fehlerwahrscheinlichkeiten.</p><ol class="reasons">' +
+        each(result.candidates, function (cand, n) { return '<li><a href="' + e(cand.change.url) + '" target="_blank" rel="noopener">[' + (n + 1) + '] ' + e(cand.change.id) + ' · ' + e(cand.change.title) + '</a><p>' + e(cand.reasons.join(' · ')) + '</p></li>'; }) + '</ol>' : '') +
+      '<div class="rca-explanation-text" aria-live="polite">Erstelle eine ausführliche Erklärung mit Hypothesen, Unsicherheiten und nächsten Prüfschritten.</div></div>\n' +
+      '<div class="dlg-foot"><button class="btn2" type="button" data-rca-generate="/bugs/' + e(encodeURIComponent(bug.number)) + '/erklaerung">KI-Erklärung erstellen</button><button class="btn2 l" type="button" data-dialog-close>Schließen</button></div>\n</dialog>';
+  }
+  var content = `<div class="fitwrap bugs-workspace">
+<div class="page-head">
+  <div>
+    <p class="page-sub">Welcher Change hat den Bug wahrscheinlich ausgelöst? Eine Hypothese für die Ursachenforschung, keine Schuldzuweisung.</p>
+  </div>
+</div>
+<div class="pane bugs-pane">
+
+${body}
+</div>
+</div>
+${dialog}`;
+  return layout(c, t('Bug-Ursache'), ' fit bugs-sheet', content);
+};
+
+// ---------------------------------------------------------------- Systementwicklung (streams.html)
+
+TEMPLATES.streams = function (c) {
+  var grid = '';
+  if (!c.error) {
+    grid = `
+    <div class="development-section-heading"><div><h3>Streams und ihre Epics</h3><p>Epic-Zuordnung aus Konfiguration und Jira · Storys und Status aus Jira</p></div><a href="${u('/tickets')}">Alle Tickets ansehen ${icon('arrow')}</a></div>
+    <div class="development-grid">
+    ${each(c.portfolio, function (stream) {
+      return `
+      <section class="development-card hue-${e(hue(stream.id))}" aria-labelledby="dev-${e(stream.id)}">
+        <div class="development-card-head">
+          <div class="development-stream-ident"><span class="development-stream-mark" aria-hidden="true">${e(stream.name.slice(0, 1))}</span><div><span class="development-kicker">ADL-Stream</span><h4 id="dev-${e(stream.id)}">${e(stream.name)}</h4></div></div>
+          <span class="development-count num">${e(stream.open)} offen <span>/ ${e(stream.total)}</span></span>
+        </div>
+        <p class="development-description">${e(stream.description)}</p>
+        <div class="development-epics">
+          ${each(stream.epics, function (epic) {
+            return `
+          <div class="development-epic">
+            <a class="development-epic-head" href="${u('/tickets?' + query({ scope: stream.id, epic: epic.key }))}" aria-label="${e(epic.key)}: ${e(epic.title)}, ${e(epic.total)} Storys ansehen">
+              <span class="development-epic-key mono">${e(epic.key)}</span><span class="development-epic-title">${e(epic.title)}</span><span class="development-epic-count num">${e(epic.open)} / ${e(epic.total)}</span>${icon('arrow')}
+            </a>
+            ${epic.stories.length ? '<ul class="development-story-list" aria-label="Aktuelle Storys in ' + e(epic.key) + '">\n              ' + each(epic.stories, function (story) {
+              return '<li><a href="' + e(story.url) + '" target="_blank" rel="noopener"><span class="mono">' + e(story.key) + '</span><span>' + e(story.summary) + '</span></a><small>' + e(phase_label(story.status)) + '</small></li>';
+            }) + '\n            </ul>' : '<p class="development-no-story">Noch keine Story zugeordnet.</p>'}
+          </div>`;
+          })}
+        </div>
+        <div class="development-card-foot"><span>${stream.unassigned ? '<b class="num">' + e(stream.unassigned) + '</b> ' + (stream.unassigned === 1 ? 'Story' : 'Storys') + ' ohne Epic' : 'Alle Storys einem Epic zugeordnet'}</span><a href="${u('/tickets?' + query({ scope: stream.id }))}">Stream öffnen ${icon('arrow')}</a></div>
+      </section>`;
+    })}
+    </div>
+
+    <a class="development-country" href="${u('/tickets?scope=adfcr')}"><span class="development-country-symbol" aria-hidden="true">C</span><span><strong>ADFCR · Länderreports</strong><small>Eigenes Country-Board, außerhalb der vier ADL-Streams</small></span><b class="num">${e(c.country_count)} Tickets</b>${icon('arrow')}</a>`;
+  }
+  var content = `<div class="development fitwrap">
+  <header class="development-intro">
+    <div>
+      <p class="development-eyebrow">Streams · Epics · Storys</p>
+      <h2>Von der Anforderung zur Story</h2>
+      <p>Vier ADL-Streams, zentral gepflegte Epics und die zugehörigen Jira-Storys. Jede Story gehört zu genau einem Stream.</p>
+    </div>
+    <a class="development-create" href="${u('/ticket')}">${icon('plus')} Neue Anforderung</a>
+  </header>
+
+  ${c.error ? '<p class="callout callout--warning">' + icon('alert') + '<span>Jira ist gerade nicht erreichbar: ' + e(c.error) + '. Ticketzahlen und Storys können nicht angezeigt werden.</span></p>' : `<div class="development-metrics" aria-label="Stand der Systementwicklung">
+    <div><strong class="num">${e(c.portfolio.length)}</strong><span>ADL-Streams</span></div>
+    <div><strong class="num">${e(c.epic_count)}</strong><span>Epics in der Zuordnung</span></div>
+    <div><strong class="num">${e(c.story_count)}</strong><span>Storys in Jira</span></div>
+    <div><strong class="num${c.unassigned_count ? ' has-gap' : ''}">${e(c.unassigned_count)}</strong><span>Storys ohne Epic</span></div>
+  </div>`}
+
+  <div class="development-sections">
+    ${grid}
+
+    <section class="development-requirements" aria-labelledby="development-stories-title">
+      <div class="development-section-heading"><div><p class="development-eyebrow">Produktanforderungen · keine Jira-Tickets</p><h3 id="development-stories-title">User Stories für den Prozess</h3><p>Aus dem AFM-Anforderungskatalog abgeleitete Aufgaben für ${e(c.app_name)}.</p></div></div>
+      <div class="development-requirement-grid">
+        <article><span>01 · Anfordernde</span><p>Als anfordernde Person möchte ich mein Vorhaben gegen bestehende Jira-Tickets und Confluence-Funktionen prüfen, damit ich keine bereits umgesetzte Funktion erneut beauftrage.</p><a href="${u('/ticket')}">Anforderung prüfen ${icon('arrow')}</a></article>
+        <article><span>02 · Stream-Verantwortliche</span><p>Als Stream-Verantwortliche möchte ich pro Epic die zugeordneten Storys und ihre offenen Status sehen, damit ich fehlende Zuordnungen vor der Planung kläre.</p><a href="${u('/tickets')}">Storys ansehen ${icon('arrow')}</a></article>
+        <article><span>03 · INT</span><p>Als INT möchte ich einen begründeten Prioritäts- und Business-Impact-Vorschlag anhand einheitlicher Fragen prüfen, damit ein „Blocker“ nachvollziehbar eingestuft wird.</p><a href="${u('/ticket')}">Einstufung prüfen ${icon('arrow')}</a></article>
+      </div>
+    </section>
+  </div>
+</div>`;
+  return layout(c, t('Systementwicklung'), ' fit', content);
+};
+
+// ---------------------------------------------------------------- Anleitungen (documents.html)
+
+TEMPLATES.documents = function (c) {
+  var current = ' aria-current="true" style="border-color: var(--text); color: var(--text)"';
+  var list = c.docs.length ? '<ul class="rows">' + each(c.docs, function (d) {
+    return `
+    <li class="card-pad">
+      <a class="row-link" href="${e(d.url || '#')}"${d.url ? ' target="_blank" rel="noopener"' : ''}>
+        <span class="row-main">
+          <span class="row-title">${e(d.title)}</span>
+          <span class="row-sub" style="white-space: normal">${e(truncate(d.body, 180))}</span>
+        </span>
+        <span class="pill">${e(source_label(d.kind))}</span>
+        ${d.url ? icon('external', 'ic ic-sm faint') : ''}
+      </a>
+    </li>`;
+  }) + '\n  </ul>' : '<div class="card-pad"><p class="empty">Noch nichts hinterlegt. Markdown-Dateien mit title, kind und url im Dokumente-Ordner erscheinen hier.</p></div>';
+  var content = `<div class="fitwrap">
+<div class="page-head">
+  <div>
+    <p class="page-sub">Anleitungen und Schulungsunterlagen für die tägliche Arbeit. Änderungen und neue Versionen findest du separat unter „Änderungen & Releases“.</p>
+  </div>
+</div>
+<div class="pane">
+<nav class="chips" aria-label="Art" style="margin-bottom: 16px">
+  <a class="chip"${!c.art ? current : ''} href="${u('/dokumente')}">Alle <span class="faint num">&nbsp;${e(c.total)}</span></a>
+  ${each(Object.keys(c.kinds), function (key) { return '<a class="chip"' + (c.art === key ? current : '') + ' href="' + u('/dokumente?' + query({ art: key })) + '">' + e(c.kinds[key]) + ' <span class="faint num">&nbsp;' + e(c.counts[key]) + '</span></a>'; })}
+</nav>
+<section class="card card--flush" aria-label="Dokumente">
+  ${list}
+</section>
+</div>
+</div>`;
+  return layout(c, 'Anleitungen', ' fit', content);
+};
+
+// ---------------------------------------------------------------- Änderungen & Releases (releases.html)
+
+TEMPLATES.releases = function (c) {
+  var list = c.changes.length ? '<ol class="rows release-list">' + each(c.changes, function (ch) {
+    return `
+        <li class="card-pad release-entry">
+          <div class="row-main">
+            <strong class="row-title">${e(ch.title)}</strong>
+            <p class="row-sub release-description">${e(ch.body)}</p>
+            ${ch.url ? '<a class="release-link" href="' + e(ch.url) + '" target="_blank" rel="noopener noreferrer">Originaldokument öffnen ↗</a>' : ''}
+          </div>
+        </li>`;
+  }) + '\n      </ol>' : '<div class="card-pad"><p class="empty">Noch keine Releases oder Change Logs hinterlegt.</p></div>';
+  var content = `<div class="fitwrap">
+  <div class="page-head">
+    <div><p class="page-sub">Versionshinweise, Change Logs und dokumentierte Änderungen im Überblick.</p></div>
+  </div>
+  <div class="pane">
+    <div class="release-heading"><h2>Änderungsverlauf</h2><span class="pill">${e(c.changes.length)} Einträge</span></div>
+    <section class="card card--flush" aria-label="Änderungsverlauf">
+      ${list}
+    </section>
+  </div>
+</div>`;
+  return layout(c, 'Änderungen & Releases', ' fit', content);
+};
+
+TEMPLATES.notfound = function (c) {
+  return layout(c, 'Nicht gefunden', ' fit', '<div class="fitwrap"><div class="pane"><section class="card"><p class="empty">Diese Seite gibt es nicht. <a href="' + u('/') + '">Zur Übersicht</a></p></section></div></div>');
+};
+</script>
