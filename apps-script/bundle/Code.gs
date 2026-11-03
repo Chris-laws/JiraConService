@@ -1673,18 +1673,19 @@ function syncEmbedder_(c) {
  * Liefert {pages, updated} (updated = jüngste Änderung im Ordner).
  */
 function readConfluenceExport_(folderId, baseUrl) {
-  var folder = DriveApp.getFolderById(folderId);
-  var files = folder.getFiles();
+  var it = DriveApp.getFolderById(folderId).getFiles();
+  var files = [];
+  while (it.hasNext()) files.push(it.next());
+  // Neueste Datei zuerst: steht eine Seite in mehreren Exporten, gilt der jüngste Stand.
+  files = sortBy(files.map(function (f) { return { f: f, at: f.getLastUpdated() }; }), function (x) { return -x.at.getTime(); });
   var pages = [], seen = {}, updated = null;
-  var add = function (name, html) {
-    var p = parseConfluenceHtml_(name, html, baseUrl);
+  var push = function (p) {
     if (p && p.body && !seen[p.id]) { seen[p.id] = true; pages.push(p); }
   };
-  while (files.hasNext()) {
-    var f = files.next();
-    var name = f.getName();
-    var at = f.getLastUpdated();
-    if (!updated || at > updated) updated = at;
+  var add = function (name, html) { push(parseConfluenceHtml_(name, html, baseUrl)); };
+  files.forEach(function (x) {
+    var f = x.f, name = f.getName();
+    if (!updated || x.at > updated) updated = x.at;
     if (/\.zip$/i.test(name)) {
       var blob = f.getBlob();
       if (blob.setContentType) blob.setContentType('application/zip');
@@ -1692,14 +1693,42 @@ function readConfluenceExport_(folderId, baseUrl) {
         var n = b.getName();
         if (/\.html?$/i.test(n) && !/(^|\/)index\.html?$/i.test(n)) add(n, b.getDataAsString('UTF-8'));
       });
+    } else if (/\.json$/i.test(name)) {
+      confluenceJsonPages_(f.getBlob().getDataAsString('UTF-8'), name).forEach(push);
     } else if (/\.html?$/i.test(name)) {
       add(name, f.getBlob().getDataAsString('UTF-8'));
     } else if (/\.doc$/i.test(name)) {
       add(name, mimeHtml_(f.getBlob().getDataAsString('UTF-8')));
     }
-  }
+  });
   return { pages: pages, updated: updated };
 }
+
+/**
+ * Datei vom Confluence-Knopf (Confluence-Knopf.html): {format: 'confluence-pages', space, pages: [{id, title, body, url}]},
+ * body als Confluence-HTML. Der Knopf liest im Browser mit der eigenen Anmeldung, nur lesend.
+ */
+function confluenceJsonPages_(text, name) {
+  var data;
+  try { data = JSON.parse(text); } catch (e) { throw new SourceUnavailable('Confluence-Datei ' + name + ' ist kein gültiges JSON'); }
+  if (!data || data.format !== 'confluence-pages' || !Array.isArray(data.pages)) return [];
+  var safeUrl = function (u) { return /^https:\/\//i.test(String(u || '')) ? String(u) : ''; };
+  return data.pages.map(function (p) {
+    return { id: String(p.id || ''), title: String(p.title || ''), body: stripHtml(String(p.body || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')),
+      space: String(p.space || data.space || ''), url: safeUrl(p.url) };
+  }).filter(function (p) { return p.id && p.title; });
+}
+
+/** Confluence aus dem Drive-Ordner, für den Betrieb ohne BigQuery. */
+function DriveConfluence(s) { this.s = s; }
+DriveConfluence.prototype.pages = function () {
+  try {
+    return readConfluenceExport_(this.s.confluenceExportFolderId, this.s.confluenceUrl).pages;
+  } catch (exc) {
+    if (exc instanceof SourceUnavailable) throw exc;
+    throw new SourceUnavailable('Confluence-Export im Drive-Ordner nicht lesbar: ' + safeFetchMessage_(exc));
+  }
+};
 
 /** HTML-Teil einer Word-Export-Datei (MIME, quoted-printable). */
 function mimeHtml_(text) {
@@ -2554,7 +2583,8 @@ function buildContainer(settings) {
   } else if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
     c.jiraWriter = new ReadOnlyJiraWriter();
-    c.confluence = new CachedConfluence(new ConfluenceRest(s));
+    // Ist Confluence von Google aus gesperrt, kommt es aus dem Export im Drive-Ordner (auch ohne BigQuery).
+    c.confluence = new CachedConfluence(s.confluenceExportFolderId ? new DriveConfluence(s) : new ConfluenceRest(s));
     c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
     c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new EmptyDocuments();
   } else {

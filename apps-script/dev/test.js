@@ -5,6 +5,7 @@ const assert = require('assert');
 const { createRuntime } = require('./runtime');
 
 let failed = 0;
+const pendingAsync = [];
 function test(name, fn) {
   try { fn(); console.log('ok   ' + name); } catch (err) { failed += 1; console.log('FAIL ' + name + '\n     ' + (err.stack || err).toString().split("\n").slice(0, 8).join('\n     ')); }
 }
@@ -651,5 +652,53 @@ test('Confluence-Test: probiert Anmeldewege nur mit GET, nennt den passenden und
   assert.deepStrictEqual(seen[seen.length - 1], ['live', '3']);
 });
 
-console.log(failed ? '\n' + failed + ' Test(s) fehlgeschlagen' : '\nAlle Tests bestanden');
-process.exit(failed ? 1 : 0);
+
+test('Confluence-Knopf (startet)', () => {
+  const vmod = require('vm');
+  const { knopfCode, page } = require('./knopf-page');
+  const calls = [];
+  const all = Array.from({ length: 120 }, (_, i) => ({ id: 1000 + i, title: 'Seite ' + i, body: { storage: { value: '<p>Text ' + i + ' &amp; mehr</p><script>x()</script>' } },
+    _links: { webui: '/pages/viewpage.action?pageId=' + (1000 + i) }, version: { when: '2026-11-01T10:00:00Z' } }));
+  let saved = null, shown = '';
+  const el = () => ({ style: {}, set textContent(v) { shown = v; }, get textContent() { return shown; }, remove() {}, click() { saved = this.download; } });
+  const sandbox = {
+    window: { AJS: { contextPath: () => '/wiki' } }, AJS: { contextPath: () => '/wiki' }, location: { origin: 'https://wiki.firma.de' },
+    prompt: (q, def) => def, setTimeout: () => {}, console,
+    document: { createElement: el, body: { appendChild: () => {} } },
+    URL: { createObjectURL: () => 'blob:x' },
+    Blob: function (parts) { this.text = parts.join(''); sandbox.__blob = this.text; },
+    fetch: async (url, opt) => {
+      calls.push([opt.method, opt.credentials, url]);
+      const u = new URL(url, 'https://wiki.firma.de');
+      const st = +u.searchParams.get('start'), lim = +u.searchParams.get('limit');
+      return { ok: true, status: 200, json: async () => ({ results: all.slice(st, st + lim) }) };
+    },
+  };
+  vmod.createContext(sandbox);
+  pendingAsync.push(vmod.runInContext(knopfCode('ADF').replace(/\}\)\(\);\s*$/, '})()'), sandbox).then(() => {
+    assert.ok(calls.length === 3 && calls.every(([m, c, u]) => m === 'GET' && c === 'same-origin' && u.startsWith('/wiki/rest/api/content?')), JSON.stringify(calls));
+    assert.strictEqual(saved, 'confluence-ADF-' + new Date().toISOString().slice(0, 10) + '.json');
+    const pages = createRuntime({}).confluenceJsonPages_(sandbox.__blob, 'x.json');
+    assert.strictEqual(pages.length, 120);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(pages[0])), { id: '1000', title: 'Seite 0', body: 'Text 0 & mehr', space: 'ADF', url: 'https://wiki.firma.de/wiki/pages/viewpage.action?pageId=1000' });
+    assert.ok(/href="javascript:/.test(page('ADF')) && !/<script/i.test(page('ADF').replace(/&lt;script/g, '')));
+    console.log('ok   Confluence-Knopf: liest im Browser nur mit GET (alle Seiten), Datei wird von der App gelesen');
+  }).catch((err) => { failed += 1; console.log('FAIL Confluence-Knopf\n     ' + (err.stack || err)); }));
+});
+
+test('Ohne BigQuery: Confluence kommt aus dem Drive-Ordner (Knopf-Datei, neueste gilt), Wissen findet es', () => {
+  const file = (body, d) => ({ name: 'confluence-ADF-' + d + '.json', updated: new Date(d + 'T10:00:00Z'),
+    text: JSON.stringify({ format: 'confluence-pages', space: 'ADF', pages: [{ id: '9', title: 'Feiertage', body: '<p>' + body + '</p>', url: 'https://wiki.firma.de/x/9' }] }) });
+  const rt = createRuntime({ scriptProperties: Object.assign({}, LIVE, { CONFLUENCE_EXPORT_FOLDER_ID: 'o' }), fetch: fakeSystems([]), email: 'chris@firma.de',
+    drive: { o: [file('alt', '2026-10-01'), file('Feiertage je Land im Bestellvorschlag', '2026-11-03')] } });
+  const pages = rt.buildContainer().confluence.pages();
+  assert.strictEqual(pages.length, 1);
+  assert.strictEqual(pages[0].body, 'Feiertage je Land im Bestellvorschlag');
+  const ans = call(rt, 'POST', '/wissen', { frage: ['Feiertage je Land'] }).ctx.answer;
+  assert.ok(ans.sources.some((x) => x.source === 'confluence' && x.id === '9'), JSON.stringify(ans.sources));
+});
+
+Promise.all(pendingAsync).then(() => {
+  console.log(failed ? '\n' + failed + ' Test(s) fehlgeschlagen' : '\nAlle Tests bestanden');
+  process.exit(failed ? 1 : 0);
+});

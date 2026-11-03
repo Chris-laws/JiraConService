@@ -129,7 +129,9 @@ ab und die Seiten lesen nur noch aus BigQuery:
 - **Confluence:** Confluence ist von Google aus oft nicht erreichbar (Anmeldeseite vor der API). Deshalb liest der
   Abgleich einen Export aus einem Drive-Ordner: Bereich exportieren als HTML (ZIP, braucht Bereichs-Admin) oder
   einzelne Seiten als Word (`.doc`) oder HTML. Neuer Export in den Ordner = beim nächsten Lauf drin; Seiten, die
-  im Ordner fehlen, fliegen raus.
+  im Ordner fehlen, fliegen raus. Ohne Admin-Rechte: der **Confluence-Knopf** (`node apps-script/dev/knopf-page.js
+  --space ADF`) liest den Bereich im Browser mit der eigenen Anmeldung (nur GET) und speichert eine `.json`-Datei für
+  den Ordner. Der Ordner funktioniert auch ohne BigQuery.
 - **Vektoren:** Für neue oder geänderte Texte rechnet Vertex beim Abgleich die Embeddings, BigQuery speichert sie.
   Eine Suche bettet nur noch die Anfrage ein, die Ähnlichkeit rechnet BigQuery (`ML.DISTANCE`).
 - **Sicherheit:** Einzige zusätzliche POST-Adresse ist der Abfrage-Endpunkt von BigQuery. Jede Anweisung muss im

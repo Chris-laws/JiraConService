@@ -18,7 +18,8 @@ function buildContainer(settings) {
   } else if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
     c.jiraWriter = new ReadOnlyJiraWriter();
-    c.confluence = new CachedConfluence(new ConfluenceRest(s));
+    // Ist Confluence von Google aus gesperrt, kommt es aus dem Export im Drive-Ordner (auch ohne BigQuery).
+    c.confluence = new CachedConfluence(s.confluenceExportFolderId ? new DriveConfluence(s) : new ConfluenceRest(s));
     c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
     c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new EmptyDocuments();
   } else {
