@@ -348,7 +348,8 @@ ConfluenceRest.prototype.pages = function () {
       } catch (exc) {
         throw new SourceUnavailable('Confluence-Antwort unerwartet: ' + exc.message);
       }
-      if (rows.length < self.limit) break;
+      // Weiter nur, solange Confluence eine nächste Seite anbietet (_links.next).
+      if (rows.length < self.limit || !(data._links && data._links.next)) break;
     }
   });
   return result;

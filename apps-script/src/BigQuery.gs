@@ -21,7 +21,10 @@
  */
 
 var BQ_HOST_ = 'https://bigquery.googleapis.com/bigquery/v2/projects/';
-var BQ_ROWS_PER_WRITE_ = 60;     // Zeilen je MERGE (mit Vektoren gut unter der Größengrenze einer Anfrage)
+var BQ_ROWS_PER_WRITE_ = 200;    // Zeilen je MERGE (mit Vektor und gekürztem Text etwa 2–3 MB, Grenze 10 MB)
+var BQ_EMBED_PER_RUN_ = 2500;    // höchstens so viele neue Vektoren je Lauf (Laufzeitgrenze 6 Minuten)
+var BQ_RUN_SECONDS_ = 270;       // danach keine neuen Schreibpakete mehr, Rest im nächsten Lauf
+var BQ_PAGE_CHARS_ = 6000;       // so viel Text je Confluence-Seite wird gespeichert
 var BQ_EMBED_CHARS_ = 2000;      // so viel Text je Ticket/Seite geht ins Embedding
 var BQ_FULL_EVERY_HOURS_ = 20;   // spätestens so oft ein Vollabgleich (entfernt gelöschte/verschobene Tickets)
 var BQ_OVERLAP_MINUTES_ = 10;    // Überlappung beim Teilabgleich, damit nichts durch die Lücke fällt
@@ -170,46 +173,94 @@ function issueText_(i) { return i.summary + '. ' + i.description; }
 function pageText_(p) { return p.title + '. ' + p.body; }
 
 /**
- * Schreibt Zeilen per MERGE (Schlüssel keyCol). Vorher: welche Texte sind neu oder geändert? Nur die gehen an Vertex.
- * Schlägt Vertex fehl, werden die Zeilen ohne Vektor geschrieben und der alte Fingerabdruck bleibt, damit der
- * nächste Lauf es erneut versucht.
+ * Schreibt Zeilen per MERGE (Schlüssel keyCol). Vorher: welche Texte sind neu oder geändert? Nur die gehen an Vertex,
+ * höchstens report.embedBudget je Lauf (große Bestände wie 10.000 Confluence-Seiten verteilen sich so auf mehrere
+ * Läufe). Zeilen ohne neuen Vektor bekommen keinen Fingerabdruck; backfill_ bettet sie in den nächsten Läufen nach.
+ * onlyChanged: nur neue/geänderte Zeilen schreiben (Confluence); sonst alle (Jira, wegen Status & Co.).
+ * Läuft die Zeit knapp (report.deadline), bleibt der Rest für den nächsten Lauf (report.pending).
  */
-function bqUpsert_(bq, table, keyCol, rows, textOf, embedder, model, runIso, report) {
+function bqUpsert_(bq, table, keyCol, rows, textOf, embedder, model, runIso, report, onlyChanged) {
   if (!rows.length) return;
   var existing = {};
-  for (var g = 0; g < rows.length; g += 2000) {
-    var keys = rows.slice(g, g + 2000).map(function (r) { return r[keyCol]; });
+  for (var g = 0; g < rows.length; g += 5000) {
+    var keys = rows.slice(g, g + 5000).map(function (r) { return r[keyCol]; });
     bq.query('-- op: existing-' + table + '\nSELECT ' + keyCol + ' AS k, text_hash, emb_model FROM ' + bq.t(table) +
       ' WHERE ' + keyCol + ' IN UNNEST(JSON_VALUE_ARRAY(@keys))', { keys: JSON.stringify(keys) })
       .forEach(function (r) { existing[r.k] = r; });
   }
-  rows.forEach(function (r) { r.text_hash = textHash_(textOf(r)); });
-  var todo = embedder ? rows.filter(function (r) {
+  var hashes = {};
+  var changed = rows.filter(function (r) {
+    var h = hashes[r[keyCol]] = textHash_(textOf(r));
     var e = existing[r[keyCol]];
-    return !e || e.text_hash !== r.text_hash || e.emb_model !== model;
-  }) : [];
+    return !e || e.text_hash !== h || (embedder && e.emb_model !== model);
+  });
+  var write = onlyChanged ? changed : rows;
+  var todo = embedder ? changed.slice(0, Math.max(0, report.embedBudget)) : [];
   if (todo.length) {
     try {
-      var vecs = embedder.embed(todo.map(function (r) { return textOf(r).slice(0, BQ_EMBED_CHARS_); }));
-      todo.forEach(function (r, n) { r.embedding = vecs[n].map(function (x) { return Math.round(x * 1e5) / 1e5; }); r.emb_model = model; });
+      embedRows_(todo, textOf, embedder, model);
       report.embedded += todo.length;
+      report.embedBudget -= todo.length;
     } catch (exc) {
       if (!(exc instanceof LlmUnavailable)) throw exc;
       report.notes.push('Vektoren fehlen (' + exc.message + '), nächster Lauf versucht es wieder');
     }
   }
+  if (embedder && changed.length > todo.length) report.pending = true;
   var cols = table === 'issues' ? BQ_ISSUE_COLS_ : BQ_PAGE_COLS_;
-  for (var s = 0; s < rows.length; s += BQ_ROWS_PER_WRITE_) {
-    var chunk = rows.slice(s, s + BQ_ROWS_PER_WRITE_).map(function (r) {
+  for (var s = 0; s < write.length; s += BQ_ROWS_PER_WRITE_) {
+    if (Date.now() > report.deadline) { report.pending = true; report.notes.push('Zeit knapp, Rest im nächsten Lauf'); break; }
+    var chunk = write.slice(s, s + BQ_ROWS_PER_WRITE_).map(function (r) {
       var o = {};
       cols.forEach(function (c) { var v = r[c[0]]; o[c[0]] = v instanceof Date ? v.toISOString() : v === undefined ? null : v; });
       o.embedding = r.embedding || [];
       o.emb_model = r.emb_model || null;
-      o.text_hash = r.text_hash;
+      // Fingerabdruck nur, wenn der Vektor zum Text passt (oder ohne Vertex gar keiner nötig ist).
+      var e = existing[r[keyCol]];
+      var fresh = r.embedding || !embedder || (e && e.text_hash === hashes[r[keyCol]] && e.emb_model === model);
+      o.text_hash = fresh ? hashes[r[keyCol]] : null;
       return o;
     });
     bq.query(bqMergeSql_(bq, table, keyCol, cols), { rows: JSON.stringify(chunk), run: runIso });
   }
+}
+
+function embedRows_(rows, textOf, embedder, model) {
+  var vecs = embedder.embed(rows.map(function (r) { return textOf(r).slice(0, BQ_EMBED_CHARS_); }));
+  rows.forEach(function (r, n) { r.embedding = vecs[n].map(function (x) { return Math.round(x * 1e5) / 1e5; }); r.emb_model = model; });
+}
+
+/** Zeilen ohne passenden Vektor (Rest aus früheren Läufen) nachträglich einbetten, im Rahmen des Budgets. */
+function backfill_(bq, embedder, model, report) {
+  if (!embedder) return;
+  [['issues', 'key', "CONCAT(IFNULL(summary, ''), '. ', IFNULL(description, ''))"], ['pages', 'id', "CONCAT(IFNULL(title, ''), '. ', IFNULL(body, ''))"]]
+    .forEach(function (t) {
+      if (report.embedBudget <= 0 || Date.now() > report.deadline) return;
+      // Voller Text (wie beim Abgleich), damit der Fingerabdruck derselbe ist und nichts doppelt eingebettet wird.
+      var rows = bq.query('-- op: backfill-' + t[0] + '\nSELECT ' + t[1] + ' AS k, ' + t[2] + ' AS text FROM ' + bq.t(t[0]) +
+        ' WHERE text_hash IS NULL OR emb_model IS NULL OR emb_model != @model LIMIT @n', { model: model, n: report.embedBudget });
+      if (!rows.length) return;
+      try {
+        embedRows_(rows, function (r) { return r.text || ' '; }, embedder, model);
+      } catch (exc) {
+        if (!(exc instanceof LlmUnavailable)) throw exc;
+        report.notes.push('Nachträgliches Einbetten: ' + exc.message);
+        return;
+      }
+      report.embedded += rows.length;
+      report.embedBudget -= rows.length;
+      for (var s = 0; s < rows.length; s += BQ_ROWS_PER_WRITE_) {
+        var chunk = rows.slice(s, s + BQ_ROWS_PER_WRITE_).map(function (r) {
+          return { k: r.k, text_hash: textHash_(r.text), emb_model: model, embedding: r.embedding };
+        });
+        bq.query('-- op: embed-' + t[0] + '\nMERGE ' + bq.t(t[0]) + ' T USING (SELECT JSON_VALUE(r, \'$.k\') AS k, ' +
+          "JSON_VALUE(r, '$.emb_model') AS emb_model, JSON_VALUE(r, '$.text_hash') AS text_hash, " +
+          "ARRAY(SELECT CAST(x AS FLOAT64) FROM UNNEST(JSON_VALUE_ARRAY(r, '$.embedding')) AS x WITH OFFSET o ORDER BY o) AS embedding " +
+          'FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r) S ON T.' + t[1] + ' = S.k ' +
+          'WHEN MATCHED THEN UPDATE SET embedding = S.embedding, emb_model = S.emb_model, text_hash = S.text_hash',
+        { rows: JSON.stringify(chunk) });
+      }
+    });
 }
 
 var BQ_ISSUE_COLS_ = [['key', 'S'], ['summary', 'S'], ['description', 'S'], ['status', 'S'], ['reporter', 'S'], ['updated', 'T'],
@@ -226,10 +277,10 @@ function bqMergeSql_(bq, table, keyCol, cols) {
     "ARRAY(SELECT CAST(x AS FLOAT64) FROM UNNEST(JSON_VALUE_ARRAY(r, '$.embedding')) AS x WITH OFFSET o ORDER BY o) AS embedding");
   var has = 'ARRAY_LENGTH(S.embedding) > 0';
   var set = cols.filter(function (c) { return c[0] !== keyCol; }).map(function (c) { return c[0] + ' = S.' + c[0]; });
-  set.push('text_hash = IF(' + has + ', S.text_hash, T.text_hash)', 'emb_model = IF(' + has + ', S.emb_model, T.emb_model)',
+  set.push('text_hash = S.text_hash', 'emb_model = IF(' + has + ', S.emb_model, T.emb_model)',
     'embedding = IF(' + has + ', S.embedding, T.embedding)', 'synced_at = TIMESTAMP(@run)');
   var names = cols.map(function (c) { return c[0]; }).concat(['text_hash', 'emb_model', 'embedding', 'synced_at']);
-  var vals = cols.map(function (c) { return 'S.' + c[0]; }).concat(['IF(' + has + ', S.text_hash, NULL)', 'S.emb_model', 'S.embedding', 'TIMESTAMP(@run)']);
+  var vals = cols.map(function (c) { return 'S.' + c[0]; }).concat(['S.text_hash', 'S.emb_model', 'S.embedding', 'TIMESTAMP(@run)']);
   return '-- op: merge-' + table + '\nMERGE ' + bq.t(table) + ' T USING (SELECT ' + sel.join(', ') +
     ' FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r) S ON T.' + keyCol + ' = S.' + keyCol +
     ' WHEN MATCHED THEN UPDATE SET ' + set.join(', ') +
@@ -260,7 +311,10 @@ function syncJira_(c, bq, st, full, runAt, report) {
   var runIso = runAt.toISOString();
   bqUpsert_(bq, 'issues', 'key', rows, issueText_, syncEmbedder_(c), c.settings.vertexEmbeddingModel, runIso, report);
   if (full) {
-    bq.query('-- op: prune-issues\nDELETE FROM ' + bq.t('issues') + ' WHERE synced_at < TIMESTAMP(@run)', { run: runIso });
+    // Was Jira nicht mehr liefert (gelöscht, verschoben), fliegt raus. Über die Keys, nicht über die Zeit: so bleibt
+    // auch bei einem abgebrochenen Lauf nichts Gültiges auf der Strecke.
+    bq.query('-- op: prune-issues\nDELETE FROM ' + bq.t('issues') + ' WHERE key NOT IN UNNEST(JSON_VALUE_ARRAY(@keys))',
+      { keys: JSON.stringify(rows.map(function (r) { return r.key; })) });
   }
   report.jira = rows.length;
   return { mark: runAt, last_run: runAt, last_full: full ? runAt : prev.last_full, ok: true,
@@ -293,7 +347,7 @@ function readConfluenceExport_(folderId, baseUrl) {
   files = sortBy(files.map(function (f) { return { f: f, at: f.getLastUpdated() }; }), function (x) { return -x.at.getTime(); });
   var pages = [], seen = {}, updated = null;
   var push = function (p) {
-    if (p && p.body && !seen[p.id]) { seen[p.id] = true; pages.push(p); }
+    if (p && p.body && !seen[p.id]) { seen[p.id] = true; p.body = p.body.slice(0, BQ_PAGE_CHARS_); pages.push(p); }
   };
   var add = function (name, html) { push(parseConfluenceHtml_(name, html, baseUrl)); };
   files.forEach(function (x) {
@@ -400,11 +454,13 @@ function syncConfluence_(c, bq, st, full, runAt, report) {
     return null; // nichts Neues im Ordner
   }
   var runIso = runAt.toISOString();
-  bqUpsert_(bq, 'pages', 'id', exp.pages, pageText_, syncEmbedder_(c), s.vertexEmbeddingModel, runIso, report);
+  bqUpsert_(bq, 'pages', 'id', exp.pages, pageText_, syncEmbedder_(c), s.vertexEmbeddingModel, runIso, report, true);
   // Der Ordner ist immer der ganze Stand: Seiten, die nicht mehr drin sind, fliegen raus.
-  bq.query('-- op: prune-pages\nDELETE FROM ' + bq.t('pages') + ' WHERE synced_at < TIMESTAMP(@run)', { run: runIso });
+  bq.query('-- op: prune-pages\nDELETE FROM ' + bq.t('pages') + ' WHERE id NOT IN UNNEST(JSON_VALUE_ARRAY(@keys))',
+    { keys: JSON.stringify(exp.pages.map(function (p) { return p.id; })) });
   report.confluence = exp.pages.length;
-  return { mark: exp.updated || runAt, last_run: runAt, last_full: runAt, ok: true,
+  // Nicht fertig geworden (Zeit): Ordner beim nächsten Lauf erneut lesen; schon Geschriebenes wird übersprungen.
+  return { mark: report.pending ? prev.mark : exp.updated || runAt, last_run: runAt, last_full: runAt, ok: true,
     note: exp.pages.length + (s.confluenceExportFolderId ? ' Seiten aus dem Export' : ' Seiten direkt aus Confluence'), row_count: exp.pages.length };
 }
 
@@ -437,7 +493,8 @@ function runSync_(c, forceFull) {
   if (!c.bq) throw new ConfigError('BQ_DATASET fehlt in den Skripteigenschaften.');
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(5000)) { Logger.log('Abgleich läuft schon, dieser Lauf entfällt.'); return { skipped: true }; }
-  var report = { jira: 0, confluence: '-', embedded: 0, notes: [], ok: true };
+  var report = { jira: 0, confluence: '-', embedded: 0, notes: [], ok: true, pending: false,
+    embedBudget: BQ_EMBED_PER_RUN_, deadline: Date.now() + BQ_RUN_SECONDS_ * 1000 };
   try {
     var bq = c.bq;
     var st = bq.state();
@@ -462,6 +519,13 @@ function runSync_(c, forceFull) {
         bq.saveState(src[0], res);
       }
     });
+    try {
+      backfill_(bq, syncEmbedder_(c), c.settings.vertexEmbeddingModel, report);
+    } catch (exc) {
+      if (exc instanceof WriteDisabled) throw exc;
+      report.notes.push('Nachbetten: ' + safeFetchMessage_(exc));
+    }
+    if (report.pending) report.notes.push('Noch nicht alles eingebettet, geht im nächsten Lauf weiter');
     // Hat sich etwas geändert: alte Listen im Cache verwerfen. Danach den Cache füllen (falls leer), damit die erste
     // Person nach dem Abgleich nicht wartet.
     if (full || report.jira) bumpCacheVersion_('jira');
@@ -476,7 +540,7 @@ function runSync_(c, forceFull) {
 }
 
 function syncSummary_(r) {
-  return 'Abgleich ' + (r.ok ? 'fertig' : 'mit Fehlern') + ': Jira ' + r.jira + ' Tickets, Confluence ' + r.confluence +
+  return 'Abgleich ' + (r.ok ? 'fertig' : 'mit Fehlern') + ': Jira ' + r.jira + ' Tickets, Confluence ' + r.confluence + ' Seiten' +
     ', neu eingebettet ' + r.embedded + (r.notes.length ? '. Hinweise: ' + r.notes.join(' | ') : '');
 }
 

@@ -496,12 +496,20 @@ function fakeBigQuery(db, calls) {
         const old = rows.find((x) => x[keyCol] === r[keyCol]);
         const has = r.embedding.length > 0;
         const row = Object.assign({}, r, { synced_at: p.run, embedding: has ? r.embedding : old ? old.embedding : [],
-          emb_model: has ? r.emb_model : old ? old.emb_model : r.emb_model, text_hash: has ? r.text_hash : old ? old.text_hash : null });
+          emb_model: has ? r.emb_model : old ? old.emb_model : r.emb_model, text_hash: r.text_hash });
         if (old) Object.assign(old, row); else rows.push(row);
       });
       return out([], []);
     }
-    if (op.startsWith('prune-')) { db[table[1]] = rows.filter((r) => !(new Date(r.synced_at) < new Date(p.run))); return out([], []); }
+    if (op.startsWith('prune-')) { const keep = JSON.parse(p.keys); db[table[1]] = rows.filter((r) => keep.includes(r[keyCol])); return out([], []); }
+    if (op.startsWith('backfill-')) {
+      return out([['k', 'STRING'], ['text', 'STRING']], rows.filter((r) => !r.text_hash || r.emb_model !== p.model).slice(0, +p.n)
+        .map((r) => ({ k: r[keyCol], text: table[1] === 'issues' ? (r.summary || '') + '. ' + (r.description || '') : (r.title || '') + '. ' + (r.body || '') })));
+    }
+    if (op.startsWith('embed-')) {
+      JSON.parse(p.rows).forEach((x) => { const r = rows.find((y) => y[keyCol] === x.k); if (r) Object.assign(r, { embedding: x.embedding, emb_model: x.emb_model, text_hash: x.text_hash }); });
+      return out([], []);
+    }
     if (op === 'search-issues') return out(ISSUE, db.issues.filter((r) => r.in_search));
     if (op === 'dashboard-issues') return out(ISSUE, db.issues.filter((r) => r.in_country || r.in_search)
       .map((r) => Object.assign({}, r, { stream: r.in_country ? null : r.stream, board_scope: r.in_country ? 'adfcr' : r.board_scope || r.stream })));
@@ -680,6 +688,7 @@ test('Confluence-Knopf (startet)', () => {
     assert.strictEqual(saved, 'confluence-ADF-' + new Date().toISOString().slice(0, 10) + '.json');
     const pages = createRuntime({}).confluenceJsonPages_(sandbox.__blob, 'x.json');
     assert.strictEqual(pages.length, 120);
+    assert.ok(!/<|x\(\)/.test(JSON.parse(sandbox.__blob).pages[0].body), 'nur Text, ohne HTML und Skript');
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pages[0])), { id: '1000', title: 'Seite 0', body: 'Text 0 & mehr', space: 'ADF', url: 'https://wiki.firma.de/wiki/pages/viewpage.action?pageId=1000' });
     assert.ok(/href="javascript:/.test(page('ADF')) && !/<script/i.test(page('ADF').replace(/&lt;script/g, '')));
     console.log('ok   Confluence-Knopf: liest im Browser nur mit GET (alle Seiten), Datei wird von der App gelesen');
@@ -696,6 +705,23 @@ test('Ohne BigQuery: Confluence kommt aus dem Drive-Ordner (Knopf-Datei, neueste
   assert.strictEqual(pages[0].body, 'Feiertage je Land im Bestellvorschlag');
   const ans = call(rt, 'POST', '/wissen', { frage: ['Feiertage je Land'] }).ctx.answer;
   assert.ok(ans.sources.some((x) => x.source === 'confluence' && x.id === '9'), JSON.stringify(ans.sources));
+});
+
+test('BigQuery-Abgleich: großer Bestand verteilt sich auf mehrere Läufe (Budget), nichts doppelt eingebettet', () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({ id: String(500 + i), title: 'Seite ' + i, body: '<p>Inhalt Nummer ' + i + ' Bestellung</p>', url: 'https://wiki.firma.de/x/' + i }));
+  const { rt, db, log } = bqWorld({ drive: { ordner1: [{ name: 'confluence-ADF-2026-11-03.json', updated: new Date('2026-11-03T10:00:00Z'),
+    text: JSON.stringify({ format: 'confluence-pages', space: 'ADF', pages: many }) }] } });
+  rt.BQ_EMBED_PER_RUN_ = 10;
+  const embedded = () => log.filter((l) => /:predict$/.test(l.url)).reduce((n, l) => n + JSON.parse(l.req.payload).instances.length, 0);
+  rt.abgleichEinrichten();
+  assert.strictEqual(db.pages.length, 30, 'alle Seiten gespeichert');
+  assert.strictEqual(db.pages.filter((p) => p.embedding.length).length, 8, '10 Vektoren je Lauf, 2 davon für Jira');
+  for (let i = 0; i < 4; i++) rt.abgleich();
+  assert.strictEqual(db.pages.filter((p) => p.embedding.length && p.text_hash).length, 30, 'nach weiteren Läufen alles da');
+  const total = embedded();
+  rt.abgleichVoll();
+  assert.strictEqual(embedded() - total, 0, 'Vollabgleich bettet nichts erneut ein');
+  assert.ok(/Seiten/.test(rt.syncSummary_({ ok: true, jira: 1, confluence: 30, embedded: 0, notes: [] })));
 });
 
 Promise.all(pendingAsync).then(() => {

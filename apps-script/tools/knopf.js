@@ -14,21 +14,29 @@
       if (!r.ok) throw new Error('Confluence antwortete mit HTTP ' + r.status);
       var d = await r.json();
       d.results.forEach(function (p) {
-        pages.push({ id: String(p.id), title: p.title, space: space, body: (p.body && p.body.storage && p.body.storage.value) || '',
+        // Nur Text (ohne HTML), höchstens 6.000 Zeichen je Seite: so bleiben auch 10.000 Seiten handlich.
+        var html = (p.body && p.body.storage && p.body.storage.value) || '';
+        var text = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000);
+        pages.push({ id: String(p.id), title: p.title, space: space, body: text,
           url: location.origin + base + ((p._links && p._links.webui) || ''), updated: (p.version && p.version.when) || '' });
       });
       if (d.results.length < limit) break;
       start += limit;
     }
     var day = new Date().toISOString().slice(0, 10);
-    var file = 'confluence-' + space + '-' + day + '.json';
-    var blob = new Blob([JSON.stringify({ format: 'confluence-pages', space: space, exported: new Date().toISOString(), pages: pages })], { type: 'application/json' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = file;
-    document.body.appendChild(a);
-    a.click();
-    box.textContent = 'Fertig: ' + pages.length + ' Seiten in ' + file + '. Datei in den Drive-Ordner legen.';
+    var size = 2500, parts = Math.max(1, Math.ceil(pages.length / size)), names = [];
+    for (var k = 0; k < parts; k++) {
+      var file = 'confluence-' + space + '-' + day + (parts > 1 ? '-teil' + (k + 1) : '') + '.json';
+      var blob = new Blob([JSON.stringify({ format: 'confluence-pages', space: space, exported: new Date().toISOString(), part: k + 1, parts: parts,
+        pages: pages.slice(k * size, (k + 1) * size) })], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      names.push(file);
+    }
+    box.textContent = 'Fertig: ' + pages.length + ' Seiten in ' + parts + ' Datei(en). Alle in den Drive-Ordner legen.';
   } catch (e) {
     box.textContent = 'Hat nicht geklappt: ' + e.message;
   }
