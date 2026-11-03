@@ -32,7 +32,7 @@ function buildContainer(settings) {
     Object.defineProperty(c, name, { get: function () { if (!(name in memo)) memo[name] = make(); return memo[name]; } });
   }
   lazy('thresholds', function () { return thresholdsFor(c.embedder.name); });
-  lazy('index', function () { return buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents); });
+  lazy('index', function () { return buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents, c.notices); });
   lazy('ticketWriter', function () { return new TicketWriter(c.llm); });
   lazy('priorityAdvisor', function () { return new PriorityAdvisor(); });
   lazy('classifier', function () { return new StreamClassifier(c.embedder, c.thresholds); });

@@ -1367,18 +1367,39 @@ VectorIndex.prototype.search = function (text, k, minScore) {
   return hits;
 };
 
-function buildKnowledgeIndex(jira, confluence, embedder, documents) {
+/**
+ * Index über Jira, Confluence und Dokumente. Fällt eine Quelle aus (z. B. Confluence hinter einer Anmeldeseite),
+ * läuft die Suche mit den übrigen weiter und oben steht ein Hinweis. Erst wenn alle ausfallen, gibt es einen Fehler.
+ */
+function buildKnowledgeIndex(jira, confluence, embedder, documents, notices) {
   var index = new VectorIndex(embedder);
-  var items = jira.searchIssues().map(function (i) {
-    return { id: i.key, text: i.summary + '. ' + i.description, title: i.key + ': ' + i.summary, url: i.url, source: 'jira',
-      payload: { status: i.status, stream: i.stream, epic: i.epic } };
+  var items = [], failures = [];
+  function source(name, load) {
+    try {
+      load().forEach(function (item) { items.push(item); });
+    } catch (exc) {
+      if (!(exc instanceof SourceUnavailable)) throw exc;
+      failures.push(exc);
+      if (notices) notices.push(name + ' ist gerade nicht erreichbar (' + exc.message + '). Gesucht wird ohne ' + name + '.');
+    }
+  }
+  source('Jira', function () {
+    return jira.searchIssues().map(function (i) {
+      return { id: i.key, text: i.summary + '. ' + i.description, title: i.key + ': ' + i.summary, url: i.url, source: 'jira',
+        payload: { status: i.status, stream: i.stream, epic: i.epic } };
+    });
   });
-  confluence.pages().forEach(function (p) {
-    items.push({ id: p.id, text: p.title + '. ' + p.body, title: p.title, url: p.url, source: 'confluence', payload: { space: p.space } });
+  source('Confluence', function () {
+    return confluence.pages().map(function (p) {
+      return { id: p.id, text: p.title + '. ' + p.body, title: p.title, url: p.url, source: 'confluence', payload: { space: p.space } };
+    });
   });
-  (documents ? documents.documents() : []).forEach(function (d) {
-    items.push({ id: d.id, text: d.title + '. ' + d.body, title: d.title, url: d.url, source: d.kind, payload: {} });
+  source('Dokumentation', function () {
+    return (documents ? documents.documents() : []).map(function (d) {
+      return { id: d.id, text: d.title + '. ' + d.body, title: d.title, url: d.url, source: d.kind, payload: {} };
+    });
   });
+  if (failures.length === 3) throw failures[0];
   index.add(items);
   return index;
 }
@@ -1907,7 +1928,7 @@ function buildContainer(settings) {
     Object.defineProperty(c, name, { get: function () { if (!(name in memo)) memo[name] = make(); return memo[name]; } });
   }
   lazy('thresholds', function () { return thresholdsFor(c.embedder.name); });
-  lazy('index', function () { return buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents); });
+  lazy('index', function () { return buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents, c.notices); });
   lazy('ticketWriter', function () { return new TicketWriter(c.llm); });
   lazy('priorityAdvisor', function () { return new PriorityAdvisor(); });
   lazy('classifier', function () { return new StreamClassifier(c.embedder, c.thresholds); });

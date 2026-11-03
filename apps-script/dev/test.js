@@ -220,6 +220,16 @@ test('Kein JSON: Seitentitel und Weiterleitungsziel werden genannt (z. B. SSO st
   });
 });
 
+test('Wissen: Confluence hinter Anmeldeseite, Suche läuft mit Jira weiter und zeigt einen Hinweis', () => {
+  const log = [];
+  const systems = fakeSystems(log);
+  const fetch = (url, req) => (url.indexOf('/rest/api/content') >= 0 ? { code: 200, text: '<html><title>BIG-IP logout page</title></html>' } : systems(url, req));
+  const rt = createRuntime({ scriptProperties: LIVE, fetch });
+  const ctx = call(rt, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] }).ctx;
+  assert.ok(ctx.notices.some((n) => /Confluence ist gerade nicht erreichbar.*BIG-IP/.test(n)), JSON.stringify(ctx.notices));
+  assert.ok(ctx.answer.sources.some((h) => h.source === 'jira'), 'Treffer aus Jira');
+});
+
 test('Ticketliste: 250 Zeilen je Paket, „Weitere laden“ bis zur Obergrenze', () => {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
   const base = rt.MOCK_DATA.issues.filter((i) => !String(i.key).startsWith('ADFCR'));
