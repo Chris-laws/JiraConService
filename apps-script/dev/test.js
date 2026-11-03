@@ -630,5 +630,26 @@ test('BigQuery-Abgleich: fällt Jira aus, läuft Confluence trotzdem; der Stand 
   assert.deepStrictEqual(db.pages.map((p) => p.id), ['555']);
 });
 
+
+test('Confluence-Test: probiert Anmeldewege nur mit GET, nennt den passenden und keinen Token', () => {
+  const seen = [];
+  const rt = createRuntime({ scriptProperties: LIVE, fetch: (url, req) => {
+    seen.push([req.method, req.followRedirects, req.headers['clientless-mode'] || '']);
+    if (req.headers['clientless-mode'] === '3') return { code: 200, text: '{"results":[]}' };
+    return { code: 302, text: '', headers: { Location: 'https://wiki.firma.de/my.policy?x=1', Server: 'BigIP' } };
+  } });
+  const lines = rt.testConfluence();
+  assert.ok(seen.every(([m, f]) => m === 'get' && f === false));
+  assert.ok(lines.some((l) => /leitet weiter nach https:\/\/wiki\.firma\.de\/my\.policy, Server BigIP/.test(l)), lines.join('\n'));
+  assert.ok(/CONFLUENCE_CLIENTLESS = 3/.test(lines[lines.length - 1]), lines.join('\n'));
+  assert.ok(!lines.join(' ').includes('pat-c'));
+  const rt2 = createRuntime({ scriptProperties: Object.assign({}, LIVE, { CONFLUENCE_CLIENTLESS: '3' }), fetch: (url, req) => {
+    seen.push(['live', req.headers['clientless-mode']]);
+    return { code: 200, text: JSON.stringify({ results: [{ id: '7', title: 'A', body: { storage: { value: 'x' } }, _links: { webui: '/x/7' } }] }) };
+  } });
+  assert.strictEqual(rt2.buildContainer().confluence.pages().length, 1);
+  assert.deepStrictEqual(seen[seen.length - 1], ['live', '3']);
+});
+
 console.log(failed ? '\n' + failed + ' Test(s) fehlgeschlagen' : '\nAlle Tests bestanden');
 process.exit(failed ? 1 : 0);

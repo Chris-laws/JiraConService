@@ -277,6 +277,7 @@ function loadSettings(props) {
     jiraAdfcrJql: prop_(props, 'JIRA_ADFCR_JQL') || 'project = ADFCR ORDER BY updated DESC',
     confluenceUrl: baseUrl_(prop_(props, 'CONFLUENCE_URL')),
     confluencePat: prop_(props, 'CONFLUENCE_PAT'),
+    confluenceClientless: /^[123]$/.test(prop_(props, 'CONFLUENCE_CLIENTLESS') || '') ? prop_(props, 'CONFLUENCE_CLIENTLESS') : null,
     confluenceSpaces: (prop_(props, 'CONFLUENCE_SPACES') || '').split(',').map(function (s) { return s.trim(); }).filter(String),
     servicenowUrl: baseUrl_(prop_(props, 'SERVICENOW_URL')),
     servicenowToken: prop_(props, 'SERVICENOW_TOKEN'),
@@ -879,25 +880,83 @@ function stripHtml(value) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function ConfluenceRest(s) { this.s = s; this.limit = 200; }
+function ConfluenceRest(s) { this.s = s; this.limit = 100; }
 ConfluenceRest.prototype.pages = function () {
   var base = requireUrl_(this.s.confluenceUrl, 'CONFLUENCE_URL');
   var self = this, result = [];
   this.s.confluenceSpaces.forEach(function (space) {
-    var data = requestJson('GET', base + '/rest/api/content', {
-      headers: bearer_(self.s.confluencePat),
-      params: { spaceKey: space, type: 'page', limit: self.limit, expand: 'body.storage' }
-    });
-    try {
-      data.results.forEach(function (r) {
-        result.push({ id: String(r.id), title: r.title, body: stripHtml(r.body.storage.value), space: space, url: base + r._links.webui });
+    for (var start = 0, n = 0; n < 50; n++, start += self.limit) {
+      var data = requestJson('GET', base + '/rest/api/content', {
+        headers: confluenceHeaders_(self.s),
+        params: { spaceKey: space, type: 'page', start: start, limit: self.limit, expand: 'body.storage' }
       });
-    } catch (exc) {
-      throw new SourceUnavailable('Confluence-Antwort unerwartet: ' + exc.message);
+      var rows;
+      try {
+        rows = data.results;
+        rows.forEach(function (r) {
+          result.push({ id: String(r.id), title: r.title, body: stripHtml(r.body.storage.value), space: space, url: base + r._links.webui });
+        });
+      } catch (exc) {
+        throw new SourceUnavailable('Confluence-Antwort unerwartet: ' + exc.message);
+      }
+      if (rows.length < self.limit) break;
     }
   });
   return result;
 };
+
+/**
+ * Anmeldung an Confluence. Standard: PAT als Bearer. Steht Confluence hinter einem F5-Anmeldegateway (BIG-IP APM),
+ * hilft manchmal dessen „Clientless-Modus“ für Programme (Header clientless-mode), Skripteigenschaft
+ * CONFLUENCE_CLIENTLESS = 1 oder 3. Welcher Weg geht, zeigt testConfluence() im Editor.
+ */
+function confluenceHeaders_(s) {
+  var h = bearer_(s.confluencePat);
+  if (s.confluenceClientless) h['clientless-mode'] = s.confluenceClientless;
+  return h;
+}
+
+/**
+ * Im Editor ausführen: probiert die Anmeldewege an Confluence durch (nur GET, ohne Weiterleitungen zu folgen) und
+ * schreibt ins Protokoll, was jeweils zurückkommt. Kein Token landet im Protokoll.
+ */
+function testConfluence() {
+  var s = loadSettings();
+  var base = requireUrl_(s.confluenceUrl, 'CONFLUENCE_URL');
+  var url = base + '/rest/api/space?limit=1';
+  assertReadOnly_('GET', url);
+  var variants = [
+    ['ohne Anmeldung', {}],
+    ['PAT als Bearer (wie bisher)', bearer_(s.confluencePat)],
+    ['PAT + clientless-mode 1', confluenceHeaders_({ confluencePat: s.confluencePat, confluenceClientless: '1' })],
+    ['PAT + clientless-mode 3', confluenceHeaders_({ confluencePat: s.confluencePat, confluenceClientless: '3' })]
+  ];
+  var lines = ['Confluence-Test gegen ' + base + '/rest/api/space'], works = null;
+  variants.forEach(function (v) {
+    var line = v[0] + ': ';
+    try {
+      var r = UrlFetchApp.fetch(url, { method: 'get', headers: v[1], muteHttpExceptions: true, followRedirects: false });
+      var code = r.getResponseCode();
+      var h = r.getHeaders ? r.getHeaders() : {};
+      var text = String(r.getContentText() || '');
+      var json = false;
+      try { json = !!JSON.parse(text); } catch (e) { json = false; }
+      var title = /<title[^>]*>([^<]{1,80})<\/title>/i.exec(text);
+      var loc = h.Location || h.location;
+      line += 'HTTP ' + code + (json ? ', JSON' : '') + (loc ? ', leitet weiter nach ' + String(loc).split(/[?#]/)[0] : '') +
+        (title ? ', Seite „' + title[1].trim() + '“' : '') + (h.Server || h.server ? ', Server ' + (h.Server || h.server) : '');
+      if (code === 200 && json && v[0] !== 'ohne Anmeldung' && !works) works = v[0];
+    } catch (exc) {
+      line += 'Fehler ' + safeFetchMessage_(exc);
+    }
+    lines.push(safeFetchMessage_({ message: line }));
+  });
+  lines.push(works ? 'ERGEBNIS: Es geht mit „' + works + '“.' + (/clientless-mode (\d)/.test(works)
+    ? ' Skripteigenschaft CONFLUENCE_CLIENTLESS = ' + /clientless-mode (\d)/.exec(works)[1] + ' setzen.' : '')
+    : 'ERGEBNIS: Kein Weg kommt durch das Anmeldegateway. Confluence bitte über den Export im Drive-Ordner (BigQuery-Abgleich).');
+  lines.forEach(function (l) { Logger.log(l); });
+  return lines;
+}
 
 // ---------- ServiceNow (Table API): Bugs (Incidents) und Changes (Patches/Deployments) ----------
 
@@ -1686,7 +1745,14 @@ function parseConfluenceHtml_(fileName, html, baseUrl) {
 function syncConfluence_(c, bq, st, full, runAt, report) {
   var s = c.settings;
   var prev = st.confluence || {};
-  var exp = readConfluenceExport_(s.confluenceExportFolderId, s.confluenceUrl);
+  var exp;
+  if (s.confluenceExportFolderId) {
+    exp = readConfluenceExport_(s.confluenceExportFolderId, s.confluenceUrl);
+  } else {
+    // Ohne Export-Ordner direkt aus Confluence (nur wenn es erreichbar ist, siehe testConfluence), einmal am Tag.
+    if (!full && prev.ok && prev.last_full) { report.confluence = 'täglich'; return null; }
+    exp = { pages: new ConfluenceRest(s).pages(), updated: runAt };
+  }
   if (!full && prev.mark && exp.updated && exp.updated <= prev.mark && prev.ok) {
     report.confluence = 'unverändert';
     return null; // nichts Neues im Ordner
@@ -1697,7 +1763,7 @@ function syncConfluence_(c, bq, st, full, runAt, report) {
   bq.query('-- op: prune-pages\nDELETE FROM ' + bq.t('pages') + ' WHERE synced_at < TIMESTAMP(@run)', { run: runIso });
   report.confluence = exp.pages.length;
   return { mark: exp.updated || runAt, last_run: runAt, last_full: runAt, ok: true,
-    note: exp.pages.length + ' Seiten aus dem Export', row_count: exp.pages.length };
+    note: exp.pages.length + (s.confluenceExportFolderId ? ' Seiten aus dem Export' : ' Seiten direkt aus Confluence'), row_count: exp.pages.length };
 }
 
 // ---------- Abgleich: Einstieg für Zeitauslöser und Editor ----------
@@ -1737,7 +1803,7 @@ function runSync_(c, forceFull) {
     var jiraPrev = st.jira || {};
     var full = forceFull || !jiraPrev.last_full || (runAt - jiraPrev.last_full) > BQ_FULL_EVERY_HOURS_ * 3600000;
     var sources = [['jira', function () { return syncJira_(c, bq, st, full, runAt, report); }]];
-    if (c.settings.confluenceExportFolderId) sources.push(['confluence', function () { return syncConfluence_(c, bq, st, full, runAt, report); }]);
+    if (c.settings.confluenceExportFolderId || (c.settings.confluenceUrl && c.settings.confluencePat)) sources.push(['confluence', function () { return syncConfluence_(c, bq, st, full, runAt, report); }]);
     sources.forEach(function (src) {
       var res;
       try {

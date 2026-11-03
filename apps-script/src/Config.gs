@@ -227,6 +227,7 @@ function loadSettings(props) {
     jiraAdfcrJql: prop_(props, 'JIRA_ADFCR_JQL') || 'project = ADFCR ORDER BY updated DESC',
     confluenceUrl: baseUrl_(prop_(props, 'CONFLUENCE_URL')),
     confluencePat: prop_(props, 'CONFLUENCE_PAT'),
+    confluenceClientless: /^[123]$/.test(prop_(props, 'CONFLUENCE_CLIENTLESS') || '') ? prop_(props, 'CONFLUENCE_CLIENTLESS') : null,
     confluenceSpaces: (prop_(props, 'CONFLUENCE_SPACES') || '').split(',').map(function (s) { return s.trim(); }).filter(String),
     servicenowUrl: baseUrl_(prop_(props, 'SERVICENOW_URL')),
     servicenowToken: prop_(props, 'SERVICENOW_TOKEN'),

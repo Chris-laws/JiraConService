@@ -105,6 +105,7 @@ besten Textstellen der Quellen.
 | `CACHE_MINUTES` | Wie lange Listen aus Jira, Confluence und ServiceNow gelten (leer: 30 Minuten, mit BigQuery 6 Stunden; sonst 1 bis 360) |
 | `BQ_DATASET` | Optional: eigener BigQuery-Datensatz (z. B. `reqalign`). Schaltet den Abgleich ein, siehe „BigQuery“ |
 | `BQ_PROJECT`, `BQ_LOCATION` | Projekt (leer = `VERTEX_PROJECT_ID`) und Ort (Standard `EU`) des Datensatzes |
+| `CONFLUENCE_CLIENTLESS` | Optional: `1` oder `3`, wenn Confluence hinter einem F5-Anmeldegateway steht und `testConfluence` im Editor das empfiehlt |
 | `CONFLUENCE_EXPORT_FOLDER_ID` | Optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word) |
 | `LLM_DAILY_LIMIT` | KI-Aufrufe je Person und Tag (Standard 200, `0` = kein Limit). Danach rechnet die App mit Regeln weiter und zeigt einen Hinweis |
 

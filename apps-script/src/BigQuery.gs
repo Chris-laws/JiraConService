@@ -358,7 +358,14 @@ function parseConfluenceHtml_(fileName, html, baseUrl) {
 function syncConfluence_(c, bq, st, full, runAt, report) {
   var s = c.settings;
   var prev = st.confluence || {};
-  var exp = readConfluenceExport_(s.confluenceExportFolderId, s.confluenceUrl);
+  var exp;
+  if (s.confluenceExportFolderId) {
+    exp = readConfluenceExport_(s.confluenceExportFolderId, s.confluenceUrl);
+  } else {
+    // Ohne Export-Ordner direkt aus Confluence (nur wenn es erreichbar ist, siehe testConfluence), einmal am Tag.
+    if (!full && prev.ok && prev.last_full) { report.confluence = 'täglich'; return null; }
+    exp = { pages: new ConfluenceRest(s).pages(), updated: runAt };
+  }
   if (!full && prev.mark && exp.updated && exp.updated <= prev.mark && prev.ok) {
     report.confluence = 'unverändert';
     return null; // nichts Neues im Ordner
@@ -369,7 +376,7 @@ function syncConfluence_(c, bq, st, full, runAt, report) {
   bq.query('-- op: prune-pages\nDELETE FROM ' + bq.t('pages') + ' WHERE synced_at < TIMESTAMP(@run)', { run: runIso });
   report.confluence = exp.pages.length;
   return { mark: exp.updated || runAt, last_run: runAt, last_full: runAt, ok: true,
-    note: exp.pages.length + ' Seiten aus dem Export', row_count: exp.pages.length };
+    note: exp.pages.length + (s.confluenceExportFolderId ? ' Seiten aus dem Export' : ' Seiten direkt aus Confluence'), row_count: exp.pages.length };
 }
 
 // ---------- Abgleich: Einstieg für Zeitauslöser und Editor ----------
@@ -409,7 +416,7 @@ function runSync_(c, forceFull) {
     var jiraPrev = st.jira || {};
     var full = forceFull || !jiraPrev.last_full || (runAt - jiraPrev.last_full) > BQ_FULL_EVERY_HOURS_ * 3600000;
     var sources = [['jira', function () { return syncJira_(c, bq, st, full, runAt, report); }]];
-    if (c.settings.confluenceExportFolderId) sources.push(['confluence', function () { return syncConfluence_(c, bq, st, full, runAt, report); }]);
+    if (c.settings.confluenceExportFolderId || (c.settings.confluenceUrl && c.settings.confluencePat)) sources.push(['confluence', function () { return syncConfluence_(c, bq, st, full, runAt, report); }]);
     sources.forEach(function (src) {
       var res;
       try {
