@@ -206,7 +206,7 @@ function robustness() {
 }
 
 function vertexCache() {
-  console.log('\n## Vertex-Embeddings: alle Texte einbetten, danach aus dem Cache');
+  console.log('\n## Vertex-Embeddings: nur die Vorauswahl einbetten, danach aus dem Cache');
   const log = [];
   const cacheStats = { gets: 0, puts: 0 };
   const sys = makeSystems(2000, log);
@@ -218,8 +218,8 @@ function vertexCache() {
   console.log(`   erster Aufruf: ${a.vx} Vertex-Aufrufe (${parallel} davon parallel), geschätzt ${fmt(a.est)}`);
   console.log(`   zweiter Aufruf: ${b.vx} Vertex-Aufrufe, ${b.sys} Systemaufrufe, ${fmt(b.est)}`);
   console.log(`   Cache: ${rt.__cache.size()} Einträge, ${cacheStats.evictions || 0} verdrängt`);
-  if (a.vx < 40) fail('erster Aufruf bettet nicht alle Texte ein (' + a.vx + ' Vertex-Aufrufe)');
-  if (!parallel) fail('Embeddings laufen nicht parallel (fetchAll)');
+  if (a.vx > 8) fail('erster Aufruf bettet zu viel ein (' + a.vx + ' Vertex-Aufrufe), Vorauswahl greift nicht');
+  if (a.est > 8000) fail('erster Ticketentwurf mit Vertex dauert geschätzt ' + fmt(a.est) + ' (Ziel unter 8 s)');
   if (b.vx > 1 || b.sys > 0) fail('zweiter Aufruf liest nicht aus dem Cache');
   if (cacheStats.evictions) fail('Cache läuft über 1.000 Einträge, Einträge werden verdrängt');
 }

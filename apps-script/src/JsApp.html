@@ -169,7 +169,8 @@
     load('GET', full, null, anchor);
   });
 
-  // Ladeanzeige nach Dauer: bis 100 ms nichts, dann der dünne Balken oben, ab 1 s ein Skelett in Form der Seite.
+  // Seitenwechsel ohne gespeicherten Stand: sofort Ziel markieren und ein Skelett mit Ladehinweis zeigen, damit man
+  // schnell durch die Seitenleiste klicken kann (die alte Seite bleibt nicht stehen). Seiten aus dem Speicher kommen ohne.
   var seq = 0, skeletonTimer = null;
   function skeletonLater(my, path) {
     clearTimeout(skeletonTimer);
@@ -187,7 +188,7 @@
       }
       var title = main.querySelector('.appbar-title');
       if (title) title.textContent = target ? target.textContent.replace(/\d+\s*$/, '').trim() : '';
-    }, 1000);
+    }, 0);
   }
   function skeletonFor(path) {
     function s(cls) { return '<span class="skel ' + cls + '"></span>'; }
@@ -197,7 +198,8 @@
     else if (/^\/(tickets|meine-tickets|releases|dokumente)$/.test(path)) body = rows(8);
     else if (/^\/(ticket|wissen|admin)$/.test(path)) body = s('skel-form');
     else body = s('skel-card') + rows(4);
-    return '<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
+    return '<p class="loading-note" role="status"><span class="spinner" aria-hidden="true"></span>' + e(t('Daten werden geladen …')) + '</p>' +
+      '<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
   }
 
   /** GET: Pfad mit Query. POST: Formularfelder als params. */

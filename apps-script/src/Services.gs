@@ -18,22 +18,51 @@ function rx_(name) {
 
 var SNIPPET_LEN = 220;
 
-function VectorIndex(embedder) { this.embedder = embedder; this.items = []; this.matrix = []; }
+/**
+ * Zweistufige Suche, damit nicht jeder Text vorab eingebettet werden muss:
+ * 1. Stichwort-Vorauswahl im Speicher (gewichtete Wortstämme, seltene Wörter zählen mehr): die besten PREFILTER_N.
+ * 2. Nur diese plus die Anfrage gehen an Vertex; die Rangfolge macht die Bedeutungsähnlichkeit.
+ * So kostet eine Suche zwei, drei Vertex-Aufrufe statt alle Tickets und Seiten einzubetten. Einmal eingebettete Texte
+ * liegen 6 Stunden im Cache.
+ */
+var PREFILTER_N = 60;
+
+function VectorIndex(embedder) { this.embedder = embedder; this.items = []; this.terms = []; this.df = {}; }
 VectorIndex.prototype.add = function (items) {
-  if (!items.length) return;
-  var vectors = this.embedder.embed(items.map(function (i) { return i.text; }));
-  this.matrix = this.matrix.concat(vectors);
-  this.items = this.items.concat(items);
+  var self = this;
+  items.forEach(function (item) {
+    var tf = {};
+    tokens(item.text).forEach(function (t) { tf[t] = (tf[t] || 0) + 1; });
+    Object.keys(tf).forEach(function (t) { self.df[t] = (self.df[t] || 0) + 1; });
+    self.terms.push(tf);
+    self.items.push(item);
+  });
+};
+VectorIndex.prototype.candidates_ = function (text) {
+  var n = this.items.length, df = this.df;
+  if (n <= PREFILTER_N) return this.items.map(function (_, i) { return i; });
+  var query = Object.keys(tokenSet(text)).filter(function (t) { return df[t]; });
+  var scored = [];
+  this.terms.forEach(function (tf, i) {
+    var score = 0;
+    query.forEach(function (t) { if (tf[t]) score += Math.log(1 + n / df[t]) * (1 + Math.log(tf[t])); });
+    if (score > 0) scored.push({ i: i, score: score });
+  });
+  return sortBy(scored, function (s) { return -s.score; }).slice(0, PREFILTER_N).map(function (s) { return s.i; });
 };
 VectorIndex.prototype.search = function (text, k, minScore) {
   k = k || 5; minScore = minScore || 0;
   if (!this.items.length || !String(text).trim()) return [];
-  var query = this.embedder.embed([text])[0];
-  var scored = this.matrix.map(function (v, idx) { return { idx: idx, score: dot(v, query) }; });
+  var self = this;
+  var pool = this.candidates_(text);
+  if (!pool.length) return [];
+  var vectors = this.embedder.embed([text].concat(pool.map(function (i) { return self.items[i].text; })));
+  var query = vectors[0];
+  var scored = pool.map(function (idx, n) { return { idx: idx, score: dot(vectors[n + 1], query) }; });
   scored = sortBy(scored, function (s) { return -s.score; });
   var hits = [];
-  for (var n = 0; n < Math.min(k, scored.length); n++) {
-    var s = scored[n];
+  for (var m = 0; m < Math.min(k, scored.length); m++) {
+    var s = scored[m];
     if (s.score < minScore) continue;
     var item = this.items[s.idx];
     hits.push({ id: item.id, score: pyRound(s.score, 4), title: item.title, url: item.url, source: item.source,

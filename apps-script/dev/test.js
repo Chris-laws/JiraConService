@@ -55,9 +55,13 @@ function fakeSystems(log) {
     log.push({ url, req });
     if (url.indexOf('aiplatform.googleapis.com') >= 0) {
       if (/:predict$/.test(url)) {
-        const n = JSON.parse(req.payload).instances.length;
-        const preds = [];
-        for (let i = 0; i < n; i++) { const v = new Array(8).fill(0); v[i % 8] = 1; v[(i + 3) % 8] = 0.5; preds.push({ embeddings: { values: v } }); }
+        // Inhaltsabhängig wie ein echtes Modell: gleiche Wörter → ähnliche Vektoren (Länge 1).
+        const preds = JSON.parse(req.payload).instances.map((x) => {
+          const v = new Array(8).fill(0);
+          String(x.content).toLowerCase().split(/[^a-zäöüß]+/).filter(Boolean).forEach((w) => { let h = 0; for (const ch of w) h = (h * 31 + ch.charCodeAt(0)) % 8; v[h] += 1; });
+          const len = Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
+          return { embeddings: { values: v.map((y) => y / len) } };
+        });
         return { code: 200, text: JSON.stringify({ predictions: preds }) };
       }
       return { code: 200, text: JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Antwort laut [1].' }] } }] }) };
@@ -270,6 +274,20 @@ test('Vertex-Embeddings: Fehler in einem Paket behält die fertigen Vektoren, 42
   const rt3 = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, fetch: fakeVertex(log3, once429) });
   assert.strictEqual(new rt3.VertexEmbedder('p', 'global', 'm').embed(texts(10)).length, 10);
   assert.strictEqual(log3.length, 2);
+});
+
+test('Suche: Stichwort-Vorauswahl, nur die besten 60 plus Anfrage werden eingebettet, Treffer stimmt', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const seen = [];
+  const embedder = { name: 'test', embed: (texts) => { seen.push(texts.length); return new rt.HashingEmbedder().embed(texts); } };
+  const index = new rt.VectorIndex(embedder);
+  const items = Array.from({ length: 3000 }, (_, i) => ({ id: 'T' + i, text: 'Ticket ' + i + ' Lager Palette Etikett Scanner ' + (i % 7 ? 'Tour' : 'Retoure'), title: 'T' + i, url: '', source: 'jira', payload: {} }));
+  items.push({ id: 'ZIEL', text: 'Bestellvorschlag berücksichtigt regionale Feiertage nicht', title: 'Ziel', url: '', source: 'jira', payload: {} });
+  index.add(items);
+  assert.strictEqual(seen.length, 0, 'Aufbau bettet nichts ein');
+  const hits = index.search('Feiertage im Bestellvorschlag fehlen', 3, 0);
+  assert.strictEqual(hits[0].id, 'ZIEL');
+  assert.ok(seen.length === 1 && seen[0] <= 61, 'höchstens 60 Kandidaten plus Anfrage, waren ' + seen);
 });
 
 test('Cache wie Apps Script: höchstens 1.000 Einträge, die kurzlebigen fliegen zuerst', () => {

@@ -211,9 +211,10 @@ Was die App tut, damit Seiten schnell erscheinen:
   liegen nach dem ersten Besuch im Browser (höchstens 12 Seiten, nur für die angemeldete Person). Sie erscheinen
   sofort; dann fragt die App mit einer Kennung (etag) nach. Ist nichts neu, kommt nur `{same: true}` zurück,
   sonst die neue Seite, ohne dass Blätterposition, Fokus oder Eingabe verloren gehen.
-- **Ladeanzeige nach Dauer:** bis 100 ms nichts, dann der dünne Balken oben, ab 1 s ein Skelett der Zielseite.
+- **Schnelles Durchklicken:** Ein Klick in der Seitenleiste markiert sofort das Ziel und zeigt ein Skelett der Seite mit „Daten werden geladen …“; die alte Seite bleibt nicht stehen. Seiten aus dem Browser-Speicher erscheinen ohne Ladeanzeige.
 - **Vorladen:** Ruht der Zeiger 80 ms auf einem Link, holt die App die Seite schon (höchstens eine Anfrage
   gleichzeitig je Browser).
+- **Ähnlichkeitssuche ohne Voreinbetten:** Wissen und Duplikatprüfung wählen zuerst per Stichwort (seltene Wörter zählen mehr) die 60 besten Kandidaten im Speicher aus; nur diese gehen an Vertex. Eine Suche kostet so ein, zwei Vertex-Aufrufe statt alle Tickets und Seiten einzubetten.
 - **Server:** Listen aus Jira, Confluence und ServiceNow liegen 30 Minuten im Script-Cache (`CACHE_MINUTES`). Große Boards holt die App nach der ersten Seite parallel (je 6 Seiten zu 500 Tickets). Ein neues Ticket erhöht
   die Versionsnummer der Jira-Listen, damit niemand den alten Stand sieht. Lesende Aufrufe an Jira & Co. werden bei
   Netzfehlern und 429/502/503/504 bis zu zweimal wiederholt (wachsende, zufällige Wartezeit); Anlegen nie.

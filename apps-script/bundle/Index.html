@@ -1320,6 +1320,11 @@ body { background: var(--ground); }
 .skel-rows { display: grid; gap: 8px; }
 .skel-row { height: 44px; border-radius: 10px; }
 .skel-form { height: 420px; border-radius: var(--radius-card); }
+.loading-note { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; color: var(--muted); font-size: 14px; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--track); border-top-color: var(--primary); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.boot-skel-main .loading-note { margin-top: 0; }
 .boot-skel { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
 .sidebar-collapsed .boot-skel { grid-template-columns: 76px minmax(0, 1fr); }
 .boot-skel-side { background: var(--side-bg, var(--surface)); border-right: 1px solid var(--card-line, var(--border)); padding: 16px; display: grid; align-content: start; gap: 12px; }
@@ -1378,7 +1383,7 @@ try { if (localStorage.getItem("sidebar-collapsed") === "true") document.documen
 <div class="fatal" id="fatal" role="alert" hidden><svg class="ic ic-sm" aria-hidden="true" focusable="false"><use href="#i-alert"/></svg><span></span></div>
 <div id="app"><div class="boot-skel" aria-busy="true" aria-label="<?= appName ?> wird geladen">
   <div class="boot-skel-side" aria-hidden="true"><span class="skel"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>
-  <div class="boot-skel-main" aria-hidden="true"><div class="skel-page"><span class="skel skel-title"></span><span class="skel skel-line"></span>
+  <div class="boot-skel-main"><p class="loading-note" role="status"><span class="spinner" aria-hidden="true"></span>Daten werden geladen …</p><div class="skel-page" aria-hidden="true"><span class="skel skel-title"></span><span class="skel skel-line"></span>
     <div class="skel-grid"><span class="skel skel-kpi"></span><span class="skel skel-kpi"></span><span class="skel skel-kpi"></span><span class="skel skel-kpi"></span></div>
     <span class="skel skel-card"></span></div></div>
 </div></div>
@@ -1409,6 +1414,7 @@ window.BOOT.promise.catch(function () {  });
 </script>
 <script>
 var I18N_EN = {
+"Daten werden geladen …": "Loading data …",
 "Anforderungsmanagement": "Requirements management",
 "Zum Inhalt springen": "Skip to content",
 "Übersicht": "Overview",
@@ -2680,7 +2686,7 @@ target.classList.add('is-active'); target.setAttribute('aria-current', 'page');
 }
 var title = main.querySelector('.appbar-title');
 if (title) title.textContent = target ? target.textContent.replace(/\d+\s*$/, '').trim() : '';
-}, 1000);
+}, 0);
 }
 function skeletonFor(path) {
 function s(cls) { return '<span class="skel ' + cls + '"></span>'; }
@@ -2690,7 +2696,8 @@ if (path === '/') body = '<div class="skel-grid">' + s('skel-kpi') + s('skel-kpi
 else if (/^\/(tickets|meine-tickets|releases|dokumente)$/.test(path)) body = rows(8);
 else if (/^\/(ticket|wissen|admin)$/.test(path)) body = s('skel-form');
 else body = s('skel-card') + rows(4);
-return '<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
+return '<p class="loading-note" role="status"><span class="spinner" aria-hidden="true"></span>' + e(t('Daten werden geladen …')) + '</p>' +
+'<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
 }
 function load(method, full, params, anchor, opts) {
 var p = splitPath(full);

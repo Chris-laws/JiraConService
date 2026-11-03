@@ -1445,6 +1445,11 @@ body { background: var(--ground); }
 .skel-rows { display: grid; gap: 8px; }
 .skel-row { height: 44px; border-radius: 10px; }
 .skel-form { height: 420px; border-radius: var(--radius-card); }
+.loading-note { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; color: var(--muted); font-size: 14px; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--track); border-top-color: var(--primary); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.boot-skel-main .loading-note { margin-top: 0; }
 .boot-skel { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); min-height: 100vh; }
 .sidebar-collapsed .boot-skel { grid-template-columns: 76px minmax(0, 1fr); }
 .boot-skel-side { background: var(--side-bg, var(--surface)); border-right: 1px solid var(--card-line, var(--border)); padding: 16px; display: grid; align-content: start; gap: 12px; }
