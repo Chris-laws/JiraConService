@@ -110,30 +110,42 @@ SCOPES_ALLOWED = {
 }
 
 
-def readonly() -> Result:
-    """Nur lesen: jeder HTTP-Aufruf läuft durch die Sperre, nur GET (außer Vertex), keine Schreib-Berechtigungen."""
+def _readonly_files(src) -> list[str]:
     hits = []
-    src = APPS / "src"
     for path in sorted(src.glob("*.gs")):
         if path.name == "MockData.gs":
             continue
         text = path.read_text(encoding="utf-8")
         if "UrlFetchApp." in text and path.name not in ("Adapters.gs", "Vertex.gs"):
             hits.append(f"{path.name}: UrlFetchApp außerhalb von Adapters.gs/Vertex.gs")
-        for m in re.finditer(r"requestJson\(\s*'(\w+)'", text):
-            if m.group(1) != "GET" and path.name != "Vertex.gs":
-                hits.append(f"{path.name}: requestJson('{m.group(1)}') an Jira/Confluence/ServiceNow")
+        bad = [m.group(1) for m in re.finditer(r"requestJson(?:All)?\(\s*'(\w+)'", text) if m.group(1) != "GET"]
+        if bad and path.name != "Vertex.gs":
+            hits.append(f"{path.name}: requestJson mit {', '.join(bad)} an Jira/Confluence/ServiceNow")
         if re.search(r"method:\s*'(put|patch|delete)'", text, re.I):
             hits.append(f"{path.name}: PUT/PATCH/DELETE im Code")
+    return hits
+
+
+def _readonly_adapters(src) -> list[str]:
+    hits = []
     adapters = (src / "Adapters.gs").read_text(encoding="utf-8")
     body = adapters[adapters.index("function requestJson(") :]
     if "assertReadOnly_(method, url);" not in body[: body.index("UrlFetchApp.fetch")]:
         hits.append("Adapters.gs: requestJson ruft assertReadOnly_ nicht vor dem Abruf auf")
-    vertex = (src / "Vertex.gs").read_text(encoding="utf-8")
-    if "assertReadOnly_('POST', url);" not in vertex:
-        hits.append("Vertex.gs: paralleles Einbetten ohne assertReadOnly_")
+    for m in re.finditer(r"\nfunction (\w+)\([^)]*\) \{\n([\s\S]*?)\n\}\n", adapters):
+        if "UrlFetchApp." in m.group(2) and "assertReadOnly_(" not in m.group(2):
+            hits.append(f"Adapters.gs: {m.group(1)} ruft UrlFetchApp ohne assertReadOnly_")
     if "JiraRestWriter" in adapters or "/rest/api/2/issue'" in adapters:
         hits.append("Adapters.gs: Code zum Anlegen in Jira ist zurück")
+    if "assertReadOnly_('POST', url);" not in (src / "Vertex.gs").read_text(encoding="utf-8"):
+        hits.append("Vertex.gs: paralleles Einbetten ohne assertReadOnly_")
+    return hits
+
+
+def readonly() -> Result:
+    """Nur lesen: jeder HTTP-Aufruf läuft durch die Sperre, nur GET (außer Vertex), keine Schreib-Berechtigungen."""
+    src = APPS / "src"
+    hits = _readonly_files(src) + _readonly_adapters(src)
     manifest = json.loads((src / "appsscript.json").read_text(encoding="utf-8"))
     extra = set(manifest.get("oauthScopes", [])) - SCOPES_ALLOWED
     hits += [f"appsscript.json: zusätzliche Berechtigung {x}" for x in sorted(extra)]

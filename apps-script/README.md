@@ -102,6 +102,7 @@ besten Textstellen der Quellen.
 | `SERVICENOW_URL`, `SERVICENOW_TOKEN` | ServiceNow-Table-API für Incidents und Changes |
 | `DOCS_FOLDER_ID` | Optional: Drive-Ordner mit Markdown-Dateien für Anleitungen, Schulungen, Change Log |
 | `USER_ROLES` | Optional: Rollen als JSON, z. B. `{"vorname.nachname@firma.de": "INT"}` |
+| `CACHE_MINUTES` | Wie lange Listen aus Jira, Confluence und ServiceNow gelten (Standard 30, 1 bis 360). Länger = schneller, aber älterer Stand |
 | `LLM_DAILY_LIMIT` | KI-Aufrufe je Person und Tag (Standard 200, `0` = kein Limit). Danach rechnet die App mit Regeln weiter und zeigt einen Hinweis |
 
 Werte, die mit `PLATZHALTER` beginnen, gelten als nicht gesetzt. Streams, Epics, Prioritäten, Lebenszyklus und
@@ -137,7 +138,7 @@ aus auf, nicht aus dem Firmennetz. Systeme, die nur im Firmennetz erreichbar sin
 Wege: die Systeme für Google Apps Script freigeben (IP-Bereiche von Google), ein API-Gateway davor, oder die Cloud-
 Varianten der Systeme. Vertex AI ist davon nicht betroffen.
 
-Jira-Daten werden 5 Minuten zwischengespeichert, Vektoren für die Ähnlichkeitssuche 6 Stunden.
+Jira-Daten werden 30 Minuten zwischengespeichert (`CACHE_MINUTES`), Vektoren für die Ähnlichkeitssuche 6 Stunden.
 
 ## Was anders ist als in der Python-Fassung
 
@@ -213,7 +214,7 @@ Was die App tut, damit Seiten schnell erscheinen:
 - **Ladeanzeige nach Dauer:** bis 100 ms nichts, dann der dünne Balken oben, ab 1 s ein Skelett der Zielseite.
 - **Vorladen:** Ruht der Zeiger 80 ms auf einem Link, holt die App die Seite schon (höchstens eine Anfrage
   gleichzeitig je Browser).
-- **Server:** Listen aus Jira, Confluence und ServiceNow liegen 5 Minuten im Script-Cache. Ein neues Ticket erhöht
+- **Server:** Listen aus Jira, Confluence und ServiceNow liegen 30 Minuten im Script-Cache (`CACHE_MINUTES`). Große Boards holt die App nach der ersten Seite parallel (je 6 Seiten zu 500 Tickets). Ein neues Ticket erhöht
   die Versionsnummer der Jira-Listen, damit niemand den alten Stand sieht. Lesende Aufrufe an Jira & Co. werden bei
   Netzfehlern und 429/502/503/504 bis zu zweimal wiederholt (wachsende, zufällige Wartezeit); Anlegen nie.
 - **Überlast:** Apps Script führt für alle Nutzer zusammen höchstens 30 Aufrufe gleichzeitig aus. Der Browser

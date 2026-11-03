@@ -121,7 +121,8 @@ var PROPERTY_DEFAULTS = {
   SERVICENOW_URL: 'PLATZHALTER-https://servicenow.example.com',
   SERVICENOW_TOKEN: 'PLATZHALTER-servicenow-token',
   DOCS_FOLDER_ID: '',                  // optional: Drive-Ordner mit Markdown-Dateien (Anleitungen, Change Log)
-  USER_ROLES: ''                       // optional: JSON {"mail@firma.de": "INT"}
+  USER_ROLES: '',                      // optional: JSON {"mail@firma.de": "INT"}
+  CACHE_MINUTES: '30'                  // so lange gelten Listen aus Jira/Confluence/ServiceNow (1 bis 360)
 };
 
 /** Einmal im Editor ausführen: legt alle Script Properties mit Platzhaltern an (vorhandene bleiben). */
@@ -140,6 +141,19 @@ function setup() {
 
 function ConfigError(message) { this.name = 'ConfigError'; this.message = message; }
 ConfigError.prototype = Object.create(Error.prototype);
+
+/**
+ * Grundadresse aus dem, was man im Browser kopiert: „https://jira.firma/secure/RapidBoard.jspa?rapidView=1“ wird
+ * zu „https://jira.firma“, „https://wiki.firma/spaces/ABC/overview“ zu „https://wiki.firma“. Ein Kontextpfad
+ * (z. B. /jira oder /wiki) bleibt erhalten.
+ */
+function baseUrl_(raw) {
+  if (!raw) return raw;
+  var url = String(raw).trim().replace(/[?#].*$/, '');
+  var cut = url.search(/\/(secure|browse|projects|issues|spaces|display|pages|plugins|dashboard\.action|rest)(\/|$|\.)/i);
+  if (cut > url.indexOf('//') + 1) url = url.slice(0, cut);
+  return url.replace(/\/+$/, '');
+}
 
 function prop_(props, key) {
   var value = String(props[key] === undefined ? '' : props[key]).trim();
@@ -201,16 +215,16 @@ function loadSettings(props) {
     llmDailyLimit: Math.max(0, parseInt(prop_(props, 'LLM_DAILY_LIMIT') || '200', 10) || 0),
     vertexEmbeddingModel: prop_(props, 'VERTEX_EMBEDDING_MODEL') || 'text-multilingual-embedding-002',
     embeddings: embeddings,
-    jiraUrl: prop_(props, 'JIRA_URL'),
+    jiraUrl: baseUrl_(prop_(props, 'JIRA_URL')),
     jiraPat: prop_(props, 'JIRA_PAT'),
     jiraJql: prop_(props, 'JIRA_JQL') || 'project = ADF ORDER BY updated DESC',
     jiraBoardIds: streamBoards,
     jiraAdfcrBoardId: boardId_(props, 'JIRA_BOARD_ADFCR'),
     jiraAdfcrJql: prop_(props, 'JIRA_ADFCR_JQL') || 'project = ADFCR ORDER BY updated DESC',
-    confluenceUrl: prop_(props, 'CONFLUENCE_URL'),
+    confluenceUrl: baseUrl_(prop_(props, 'CONFLUENCE_URL')),
     confluencePat: prop_(props, 'CONFLUENCE_PAT'),
     confluenceSpaces: (prop_(props, 'CONFLUENCE_SPACES') || '').split(',').map(function (s) { return s.trim(); }).filter(String),
-    servicenowUrl: prop_(props, 'SERVICENOW_URL'),
+    servicenowUrl: baseUrl_(prop_(props, 'SERVICENOW_URL')),
     servicenowToken: prop_(props, 'SERVICENOW_TOKEN'),
     docsFolderId: prop_(props, 'DOCS_FOLDER_ID'),
     userRoles: userRoles

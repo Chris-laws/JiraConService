@@ -170,6 +170,40 @@ test('Fehlerantwort: Begründung von Jira wird angezeigt, ohne Tokens; HTML-Seit
   }
 });
 
+test('Adressen aus dem Browser: Grundadresse wird erkannt (Board-, Bereichs- und Seiten-Links)', () => {
+  const rt = createRuntime({});
+  const cases = [
+    ['https://jira.firma/secure/RapidBoard.jspa?rapidView=42249&projectKey=ADFCR', 'https://jira.firma'],
+    ['https://jira.firma/jira/browse/ADFCR-1', 'https://jira.firma/jira'],
+    ['https://wiki.firma/spaces/ADINT/overview', 'https://wiki.firma'],
+    ['https://wiki.firma/confluence/display/ADINT/Start', 'https://wiki.firma/confluence'],
+    ['https://wiki.firma/pages/viewpage.action?pageId=1', 'https://wiki.firma'],
+    ['https://jira.firma/', 'https://jira.firma'],
+  ];
+  for (const [raw, want] of cases) assert.strictEqual(rt.baseUrl_(raw), want, raw);
+  const log = [];
+  const r2 = createRuntime({ scriptProperties: Object.assign({}, LIVE, { CONFLUENCE_URL: 'https://wiki.firma.de/spaces/ADF/overview' }), fetch: fakeSystems(log) });
+  call(r2, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] });
+  assert.ok(log.some((l) => l.url.indexOf('https://wiki.firma.de/rest/api/content') === 0), 'Confluence-API unter der Grundadresse');
+});
+
+test('Jira mit vielen Tickets: erste Seite, dann die übrigen gleichzeitig (fetchAll), alle Tickets da', () => {
+  const issues = Array.from({ length: 1234 }, (_, i) => ({ key: 'ADFCR-' + i, fields: { summary: 's' + i, description: '', status: { name: 'NEW REQUIREMENT' },
+    reporter: { emailAddress: 'x@firma.de' }, updated: '2026-10-01T10:00:00.000+0000', created: '2026-10-01T10:00:00.000+0000', components: [], issuetype: { name: 'Story' } } }));
+  let single = 0, parallel = 0;
+  const fetch = (url, req, batch) => {
+    if (batch) parallel++; else single++;
+    const q = new URL(url).searchParams; const start = +q.get('startAt'); const max = +q.get('maxResults');
+    return { code: 200, text: JSON.stringify({ startAt: start, maxResults: max, total: issues.length, issues: issues.slice(start, start + max) }) };
+  };
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'live', JIRA_URL: 'https://jira.firma', JIRA_PAT: 'p' }, fetch });
+  const got = new rt.JiraRestReader(rt.loadSettings()).searchIssues();
+  assert.strictEqual(got.length, 1234);
+  assert.strictEqual(new Set(got.map((i) => i.key)).size, 1234);
+  assert.strictEqual(single, 1, 'nur die erste Seite einzeln');
+  assert.strictEqual(parallel, 2, 'die übrigen zwei Seiten gleichzeitig');
+});
+
 test('Ticketliste: 250 Zeilen je Paket, „Weitere laden“ bis zur Obergrenze', () => {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
   const base = rt.MOCK_DATA.issues.filter((i) => !String(i.key).startsWith('ADFCR'));

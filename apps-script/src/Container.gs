@@ -53,19 +53,26 @@ function FallbackEmbedder(primary, notices) {
   this.fallback = new HashingEmbedder();
   this.notices = notices;
   this.failed = false;
-  this.name = primary.name;
+  this.checked = false;
+  // Der Name entscheidet über die Schwellwerte; wer ihn liest, löst den Verbindungstest aus.
+  Object.defineProperty(this, 'name', { get: function () { this.check_(); return this.failed ? this.fallback.name : this.primary.name; } });
+}
+/** Verbindungstest erst beim ersten Einbetten, damit Seiten ohne Ähnlichkeitssuche keinen Vertex-Aufruf kosten. */
+FallbackEmbedder.prototype.check_ = function () {
+  if (this.checked) return;
+  this.checked = true;
   try {
-    primary.embed(['Verbindungstest']);
+    this.primary.embed(['Verbindungstest']);
   } catch (exc) {
     if (!(exc instanceof LlmUnavailable)) throw exc;
     this.useFallback_(exc);
   }
-}
+};
 FallbackEmbedder.prototype.useFallback_ = function (exc) {
   this.failed = true;
-  this.name = this.fallback.name;
   this.notices.push('Vertex Embeddings nicht erreichbar (' + exc.message + '). Ähnlichkeiten werden offline berechnet.');
 };
 FallbackEmbedder.prototype.embed = function (texts) {
+  this.check_();
   return (this.failed ? this.fallback : this.primary).embed(texts);
 };

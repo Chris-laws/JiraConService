@@ -81,6 +81,37 @@ function requestJson(method, url, options) {
   }
 }
 
+/**
+ * Mehrere Abrufe gleichzeitig (UrlFetchApp.fetchAll), gleiche Sperre wie requestJson: nur GET (bzw. POST an Vertex).
+ * items: [{url, params}]. Liefert die JSON-Antworten in derselben Reihenfolge. Fehlt eine, wird sie einzeln wiederholt.
+ */
+function requestJsonAll(method, items, options) {
+  options = options || {};
+  var ErrorType = options.error || SourceUnavailable;
+  var reqs = items.map(function (it) {
+    var url = it.url;
+    if (it.params) {
+      url += (url.indexOf('?') >= 0 ? '&' : '?') + Object.keys(it.params).map(function (k) {
+        return encodeURIComponent(k) + '=' + encodeURIComponent(it.params[k]);
+      }).join('&');
+    }
+    assertReadOnly_(method, url);
+    return { url: url, method: method.toLowerCase(), headers: options.headers || {}, muteHttpExceptions: true, followRedirects: true };
+  });
+  if (reqs.length === 1) return [requestJson(method, items[0].url, { headers: options.headers, params: items[0].params, error: ErrorType })];
+  var t0 = Date.now(), resps;
+  PERF_.fetches += reqs.length;
+  try { resps = UrlFetchApp.fetchAll(reqs); } catch (exc) { resps = []; }
+  PERF_.fetchMs += Date.now() - t0;
+  return items.map(function (it, n) {
+    var r = resps[n], code = r ? r.getResponseCode() : 0;
+    if (code >= 200 && code < 300) {
+      try { return JSON.parse(r.getContentText()); } catch (e) { /* unten einzeln */ }
+    }
+    return requestJson(method, it.url, { headers: options.headers, params: it.params, error: ErrorType }); // einzeln mit Wiederholung
+  });
+}
+
 /** Erste Zeile der Fehlermeldung, ohne Query-Teile von Adressen (dort könnten Tokens stehen). */
 /**
  * Begründung aus der Fehlerantwort, damit man sieht, WARUM (z. B. Jira: „Das Projekt ADF existiert nicht“).
@@ -151,20 +182,34 @@ function JiraRestReader(s) {
 }
 JiraRestReader.prototype.base_ = function () { return requireUrl_(this.s.jiraUrl, 'JIRA_URL'); };
 JiraRestReader.prototype.paged_ = function (path, params) {
-  var base = this.base_();
-  var start = 0, result = [];
-  while (true) {
-    var p = { startAt: start, maxResults: this.max, fields: this.fields };
+  var base = this.base_(), self = this;
+  var query = function (start) {
+    var p = { startAt: start, maxResults: self.max, fields: self.fields };
     Object.keys(params).forEach(function (k) { p[k] = params[k]; });
-    var data = requestJson('GET', base + path, { headers: bearer_(this.s.jiraPat), params: p });
+    return p;
+  };
+  var check = function (data) {
     var rows = data && data.issues;
     var total = data ? parseInt(data.total, 10) : NaN;
     if (!Array.isArray(rows) || !(total >= 0)) throw new SourceUnavailable('Jira-Antwort unerwartet: issues/total ungültig');
-    for (var i = 0; i < rows.length; i++) result.push(this.toIssue_(rows[i], base));
-    start += rows.length;
-    if (start >= total) return result;
-    if (!rows.length) throw new SourceUnavailable('Jira-Antwort enthält eine leere Seite vor dem Ende');
+    return { rows: rows, total: total };
+  };
+  var first = check(requestJson('GET', base + path, { headers: bearer_(this.s.jiraPat), params: query(0) }));
+  var pages = [first.rows];
+  // Die Gesamtzahl steht in der ersten Antwort: die übrigen Seiten gleichzeitig holen (je 6), statt nacheinander.
+  var starts = [];
+  for (var s = first.rows.length; first.rows.length && s < first.total; s += this.max) starts.push(s);
+  for (var g = 0; g < starts.length; g += 6) {
+    var group = starts.slice(g, g + 6);
+    requestJsonAll('GET', group.map(function (st) { return { url: base + path, params: query(st) }; }), { headers: bearer_(this.s.jiraPat) })
+      .forEach(function (data) { pages.push(check(data).rows); });
   }
+  var result = [];
+  pages.forEach(function (rows) { rows.forEach(function (r) { result.push(self.toIssue_(r, base)); }); });
+  if (result.length < first.total && pages.some(function (rows) { return !rows.length; })) {
+    throw new SourceUnavailable('Jira-Antwort enthält eine leere Seite vor dem Ende');
+  }
+  return result;
 };
 JiraRestReader.prototype.search_ = function (jql) { return this.paged_('/rest/api/2/search', { jql: jql }); };
 JiraRestReader.prototype.board_ = function (id) { return this.paged_('/rest/agile/1.0/board/' + id + '/issue', {}); };
@@ -379,7 +424,12 @@ EmptyDocuments.prototype.documents = function () { return []; };
 // ---------- Zwischenspeicher für Live-Abfragen ----------
 // Jede Seite lädt die Jira-Daten neu; für ein paar Minuten reicht der Stand aus dem Cache.
 
-var CACHE_SECONDS_ = 300;
+var CACHE_SECONDS_ = 1800; // Standard 30 Minuten; Skripteigenschaft CACHE_MINUTES (1 bis 360) ändert das
+function cacheSeconds_() {
+  var m = 0;
+  try { m = parseInt(PropertiesService.getScriptProperties().getProperty('CACHE_MINUTES') || '', 10); } catch (e) { m = 0; }
+  return m >= 1 ? Math.min(m, 360) * 60 : CACHE_SECONDS_;
+}
 
 /** Versions-Token je Datenquelle: ein Schreibvorgang setzt ein neues, alte Cache-Stände gelten dann nicht mehr. */
 function cacheVersion_(cache, group) { return cache.get('ver:' + group) || '0'; }
@@ -401,7 +451,7 @@ function cachedList_(cacheKey, loader, dateFields) {
     } catch (e) { /* defekter Cache: neu laden */ }
   }
   var list = loader();
-  writeChunked_(cache, cacheKey, JSON.stringify(list), CACHE_SECONDS_);
+  writeChunked_(cache, cacheKey, JSON.stringify(list), cacheSeconds_());
   return list;
 }
 
