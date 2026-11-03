@@ -208,6 +208,18 @@ test('Jira mit vielen Tickets: erste Seite, dann die übrigen gleichzeitig (fetc
   assert.strictEqual(parallel, 2, 'die übrigen zwei Seiten gleichzeitig');
 });
 
+test('Kein JSON: Seitentitel und Weiterleitungsziel werden genannt (z. B. SSO statt PAT)', () => {
+  const fetch = (url, req) => (req.followRedirects === false
+    ? { code: 302, text: '', headers: { Location: 'https://sso.firma.de/login?ticket=geheim' } }
+    : { code: 200, text: '<html><head><title>Anmelden - Confluence</title></head></html>' });
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'live', CONFLUENCE_URL: 'https://wiki.firma.de', CONFLUENCE_PAT: 'p', CONFLUENCE_SPACES: 'ADINT' }, fetch });
+  assert.throws(() => new rt.ConfluenceRest(rt.loadSettings()).pages(), (e) => {
+    assert.ok(/kein JSON \(Seite „Anmelden - Confluence“, leitet weiter nach https:\/\/sso\.firma\.de\/login\)/.test(e.message), e.message);
+    assert.ok(!/geheim/.test(e.message));
+    return true;
+  });
+});
+
 test('Ticketliste: 250 Zeilen je Paket, „Weitere laden“ bis zur Obergrenze', () => {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
   const base = rt.MOCK_DATA.issues.filter((i) => !String(i.key).startsWith('ADFCR'));

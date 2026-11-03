@@ -81,7 +81,7 @@ function createRuntime(options) {
       fetch: (url, req) => {
         if (!options.fetch) throw new Error('Kein Netz in der lokalen Laufzeit: ' + url.split('?')[0]);
         const r = options.fetch(url, req);
-        return { getResponseCode: () => r.code, getContentText: () => r.text };
+        return { getResponseCode: () => r.code, getContentText: () => r.text, getHeaders: () => r.headers || {} };
       },
       // Parallel wie in Apps Script; options.fetch erfährt über das dritte Argument, welche Aufrufe zusammen laufen.
       fetchAll: (requests) => {

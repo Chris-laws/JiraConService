@@ -619,8 +619,33 @@ function requestJson(method, url, options) {
   try {
     return JSON.parse(resp.getContentText());
   } catch (e) {
-    throw new ErrorType(method + ' ' + host + ' lieferte kein JSON');
+    throw new ErrorType(method + ' ' + host + ' lieferte kein JSON' + notJsonDetail_(method, url, req, resp));
   }
+}
+
+/**
+ * Warum kam kein JSON? Meist eine Anmeldeseite (SSO), weil der PAT nicht angenommen wird, oder eine Weiterleitung
+ * auf einen anderen Pfad (z. B. /confluence). Nennt den Seitentitel und, nur bei GET, das Weiterleitungsziel
+ * (ein zweiter Abruf ohne Weiterleitung, ohne Query-Teil gemeldet).
+ */
+function notJsonDetail_(method, url, req, resp) {
+  var parts = [];
+  try {
+    var m = /<title[^>]*>([^<]{1,120})<\/title>/i.exec(String(resp.getContentText() || ''));
+    if (m) parts.push('Seite „' + m[1].replace(/\s+/g, ' ').trim() + '“');
+  } catch (e) { /* egal */ }
+  if (method === 'GET') {
+    try {
+      assertReadOnly_('GET', url);
+      var probe = UrlFetchApp.fetch(url, { method: 'get', headers: req.headers, muteHttpExceptions: true, followRedirects: false });
+      var code = probe.getResponseCode();
+      var headers = probe.getHeaders ? probe.getHeaders() : {};
+      var loc = headers.Location || headers.location || '';
+      if (code >= 300 && code < 400 && loc) parts.push('leitet weiter nach ' + String(loc).split(/[?#]/)[0]);
+      else parts.push('HTTP ' + code + ' ohne Weiterleitung');
+    } catch (e) { /* egal */ }
+  }
+  return parts.length ? ' (' + safeFetchMessage_({ message: parts.join(', ') }) + ')' : '';
 }
 
 /**
