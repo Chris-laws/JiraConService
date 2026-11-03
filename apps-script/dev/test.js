@@ -6,7 +6,7 @@ const { createRuntime } = require('./runtime');
 
 let failed = 0;
 function test(name, fn) {
-  try { fn(); console.log('ok   ' + name); } catch (err) { failed += 1; console.log('FAIL ' + name + '\n     ' + (err.stack || err).toString().split('\n').slice(0, 3).join('\n     ')); }
+  try { fn(); console.log('ok   ' + name); } catch (err) { failed += 1; console.log('FAIL ' + name + '\n     ' + (err.stack || err).toString().split("\n").slice(0, 8).join('\n     ')); }
 }
 const call = (rt, method, path, params) => JSON.parse(rt.apiRequest(method, path, params || {}));
 
@@ -456,6 +456,178 @@ test('Gebündelte Fassung (bundle/) ist aktuell und rechnet gleich', () => {
   assert.strictEqual(a, b);
   const html = fs.readFileSync(path.join(__dirname, '..', 'bundle', 'Index.html'), 'utf8');
   assert.ok(!/include\(/.test(html), 'Index.html enthält noch include()');
+});
+
+
+// ---------- BigQuery (Nachbildung: erkennt jede Anweisung an ihrem „-- op:“-Etikett) ----------
+
+function fakeBigQuery(db, calls) {
+  const T = (d) => (d ? String(new Date(d).getTime() / 1000) : null);
+  const out = (fields, rows) => ({ code: 200, text: JSON.stringify({ jobComplete: true,
+    schema: { fields: fields.map(([name, type, mode]) => ({ name, type, mode: mode || 'NULLABLE' })) },
+    rows: rows.map((r) => ({ f: fields.map(([n, type, mode]) => ({ v: mode === 'REPEATED' ? (r[n] || []).map((x) => ({ v: String(x) }))
+      : r[n] === null || r[n] === undefined ? null : type === 'TIMESTAMP' ? T(r[n]) : String(r[n]) })) })) }) });
+  const ISSUE = [['key', 'STRING'], ['summary', 'STRING'], ['description', 'STRING'], ['status', 'STRING'], ['reporter', 'STRING'],
+    ['updated', 'TIMESTAMP'], ['url', 'STRING'], ['stream', 'STRING'], ['epic', 'STRING'], ['issue_type', 'STRING'],
+    ['created', 'TIMESTAMP'], ['resolved', 'TIMESTAMP'], ['board_scope', 'STRING']];
+  return (url, req) => {
+    const body = JSON.parse(req.payload);
+    const p = {};
+    (body.queryParameters || []).forEach((q) => {
+      p[q.name] = q.parameterType.type === 'ARRAY' ? q.parameterValue.arrayValues.map((x) => +x.value) : q.parameterValue.value === undefined ? null : q.parameterValue.value;
+    });
+    const op = /-- op: ([\w-]+)/.exec(body.query)[1];
+    calls.push({ op, sql: body.query, params: p, url, headers: req.headers });
+    const table = /-(issues|pages)$/.exec(op);
+    const keyCol = table && table[1] === 'issues' ? 'key' : 'id';
+    const rows = table ? db[table[1]] : null;
+    if (op === 'schema') return out([], []);
+    if (op === 'state-read') return out([['source', 'STRING'], ['mark', 'TIMESTAMP'], ['last_run', 'TIMESTAMP'], ['last_full', 'TIMESTAMP'],
+      ['ok', 'BOOL'], ['note', 'STRING'], ['row_count', 'INT64']], Object.values(db.state));
+    if (op === 'state-write') { db.state[p.source] = { source: p.source, mark: p.mark, last_run: p.last_run, last_full: p.last_full, ok: p.ok === 'true', note: p.note, row_count: +p.rows }; return out([], []); }
+    if (op.startsWith('existing-')) {
+      const keys = JSON.parse(p.keys);
+      return out([['k', 'STRING'], ['text_hash', 'STRING'], ['emb_model', 'STRING']],
+        rows.filter((r) => keys.includes(r[keyCol])).map((r) => ({ k: r[keyCol], text_hash: r.text_hash, emb_model: r.emb_model })));
+    }
+    if (op.startsWith('merge-')) {
+      JSON.parse(p.rows).forEach((r) => {
+        const old = rows.find((x) => x[keyCol] === r[keyCol]);
+        const has = r.embedding.length > 0;
+        const row = Object.assign({}, r, { synced_at: p.run, embedding: has ? r.embedding : old ? old.embedding : [],
+          emb_model: has ? r.emb_model : old ? old.emb_model : r.emb_model, text_hash: has ? r.text_hash : old ? old.text_hash : null });
+        if (old) Object.assign(old, row); else rows.push(row);
+      });
+      return out([], []);
+    }
+    if (op.startsWith('prune-')) { db[table[1]] = rows.filter((r) => !(new Date(r.synced_at) < new Date(p.run))); return out([], []); }
+    if (op === 'search-issues') return out(ISSUE, db.issues.filter((r) => r.in_search));
+    if (op === 'dashboard-issues') return out(ISSUE, db.issues.filter((r) => r.in_country || r.in_search)
+      .map((r) => Object.assign({}, r, { stream: r.in_country ? null : r.stream, board_scope: r.in_country ? 'adfcr' : r.board_scope || r.stream })));
+    if (op === 'pages') return out([['id', 'STRING'], ['title', 'STRING'], ['body', 'STRING'], ['space', 'STRING'], ['url', 'STRING']], db.pages);
+    if (op === 'vector-search') {
+      const dotp = (a, b) => a.reduce((s, x, i) => s + x * b[i], 0);
+      const cand = db.issues.filter((r) => r.in_search).map((r) => ({ source: 'jira', id: r.key, title: r.key + ': ' + r.summary, url: r.url,
+        snippet: (r.summary + '. ' + r.description).slice(0, +p.len), payload: JSON.stringify({ status: r.status, stream: r.stream, epic: r.epic }), e: r.embedding, m: r.emb_model }))
+        .concat(db.pages.map((r) => ({ source: 'confluence', id: r.id, title: r.title, url: r.url, snippet: (r.title + '. ' + r.body).slice(0, +p.len),
+          payload: JSON.stringify({ space: r.space }), e: r.embedding, m: r.emb_model })))
+        .filter((r) => r.m === p.model && r.e.length === +p.dim).map((r) => Object.assign(r, { score: dotp(r.e, p.q) }))
+        .sort((a, b) => b.score - a.score).slice(0, +p.k);
+      return out([['source', 'STRING'], ['id', 'STRING'], ['title', 'STRING'], ['url', 'STRING'], ['snippet', 'STRING'], ['payload', 'STRING'], ['score', 'FLOAT64']], cand);
+    }
+    throw new Error('Unbekannte BigQuery-Anweisung: ' + op);
+  };
+}
+
+const BQ = Object.assign({}, LIVE, { BQ_DATASET: 'reqalign', CONFLUENCE_EXPORT_FOLDER_ID: 'ordner1', JIRA_BOARD_ADFCR: '42249' });
+const EXPORT_HTML = (title, body) => `<html><head><title>ADINT : ${title}</title></head><body><div id="breadcrumbs">Start</div>` +
+  `<div id="main-content" class="wiki-content group"><p>${body}</p></div><div class="pageSection group">Anhänge</div></body></html>`;
+
+function bqWorld(extra) {
+  const db = { issues: [], pages: [], state: {} };
+  const log = [], calls = [];
+  const systems = fakeSystems(log);
+  const bq = fakeBigQuery(db, calls);
+  const board = [{ key: 'ADFCR-7', fields: { summary: 'Feiertage im Bestellvorschlag', description: 'Land AT braucht Feiertage',
+    status: { name: 'NEW REQUIREMENT' }, reporter: { emailAddress: 'chris@firma.de' }, updated: '2026-11-02T09:00:00.000+0100',
+    created: '2026-11-01T09:00:00.000+0100', resolutiondate: null, components: [], issuetype: { name: 'Story' } } }];
+  const fetch = (url, req) => {
+    if (url.startsWith('https://bigquery.googleapis.com/')) return bq(url, req);
+    if (url.indexOf('/rest/agile/1.0/board/42249/issue') >= 0) { log.push({ url, req }); return { code: 200, text: JSON.stringify({ total: board.length, issues: board }) }; }
+    return systems(url, req);
+  };
+  const drive = { ordner1: [{ name: 'ADINT-export.zip', updated: new Date('2026-11-01T08:00:00Z'), entries: [
+    { name: 'ADINT/index.html', text: '<html><title>Index</title></html>' },
+    { name: 'ADINT/Feiertagslogik_123456.html', text: EXPORT_HTML('Feiertagslogik', 'Feiertage je Land werden im Bestellvorschlag berücksichtigt &amp; gepflegt.') }] },
+  { name: 'Leitfaden.doc', updated: new Date('2026-10-01T08:00:00Z'),
+    text: 'MIME-Version: 1.0\nContent-Transfer-Encoding: quoted-printable\n\n<html><head><title>ADINT : Leitfaden Tickets</title></head><body>Gr=C3=BC=\nnde f=C3=BCr Tickets</body></html>' }] };
+  const rt = createRuntime(Object.assign({ scriptProperties: BQ, fetch, email: 'chris@firma.de', drive }, extra || {}));
+  return { rt, db, log, calls, board };
+}
+
+test('BigQuery-Abgleich: Jira und Confluence-Export landen mit Vektoren im eigenen Datensatz, Auslöser alle 15 Minuten', () => {
+  const { rt, db, log, calls } = bqWorld();
+  const report = rt.abgleichEinrichten();
+  assert.ok(report.ok, JSON.stringify(report));
+  assert.deepStrictEqual(rt.__triggers.map((t) => [t.fn, t.minutes]), [['abgleich', 15]]);
+  assert.deepStrictEqual(db.issues.map((i) => [i.key, i.in_search, i.in_country]).sort(), [['ADF-1', true, false], ['ADFCR-7', false, true]]);
+  assert.ok(db.issues.every((i) => i.embedding.length === 8 && i.emb_model === 'text-multilingual-embedding-002'));
+  assert.deepStrictEqual(db.pages.map((p) => [p.id, p.title, p.space]).sort(), [['123456', 'Feiertagslogik', 'ADINT'], ['Leitfaden', 'Leitfaden Tickets', 'ADINT']]);
+  assert.strictEqual(db.pages.find((p) => p.id === '123456').body, 'Feiertage je Land werden im Bestellvorschlag berücksichtigt & gepflegt.');
+  assert.strictEqual(db.pages.find((p) => p.id === '123456').url, 'https://wiki.firma.de/pages/viewpage.action?pageId=123456');
+  assert.strictEqual(db.pages.find((p) => p.id === 'Leitfaden').body, 'Gründe für Tickets');
+  assert.strictEqual(db.state.jira.ok, true);
+  assert.ok(/Vollabgleich: 2 Tickets/.test(db.state.jira.note), db.state.jira.note);
+  // Jira nur GET, BigQuery nur über den Abfrage-Endpunkt mit Google-Token und Projekt
+  assert.ok(log.filter((l) => /jira\.firma\.de/.test(l.url)).every((l) => l.req.method === 'get'));
+  assert.ok(calls.every((c) => c.url === 'https://bigquery.googleapis.com/bigquery/v2/projects/mein-projekt-123/queries' && c.headers.Authorization === 'Bearer test-token'));
+  assert.ok(calls.every((c) => !/ADFCR-7|Feiertag/.test(c.sql)), 'Daten nur als Parameter, nie im SQL-Text');
+});
+
+test('BigQuery-Abgleich: Teilabgleich fragt nur Änderungen ab und bettet nur geänderte Texte neu ein', () => {
+  const { rt, db, log, calls, board } = bqWorld();
+  rt.abgleichEinrichten();
+  const predicts = () => log.filter((l) => /:predict$/.test(l.url)).reduce((n, l) => n + JSON.parse(l.req.payload).instances.length, 0);
+  const before = predicts();
+  log.length = 0;
+  board[0].fields.description = 'Land AT und CH brauchen Feiertage';
+  rt.abgleich();
+  const jql = log.filter((l) => /jira\.firma\.de/.test(l.url)).map((l) => decodeURIComponent(l.url.split('jql=')[1] || '').split('&')[0]);
+  assert.ok(jql.length && jql.every((q) => /updated >= -1\dm/.test(q.replace(/\+/g, ' '))), jql.join(' | '));
+  assert.ok(jql.some((q) => /^\(project = ADF\) AND updated >= -\d+m ORDER BY updated DESC$/.test(q.replace(/\+/g, ' '))), jql.join(' | '));
+  assert.strictEqual(predicts(), 1, 'nur das geänderte Ticket (Confluence-Ordner unverändert)');
+  assert.ok(before >= 4);
+  assert.strictEqual(db.issues.find((i) => i.key === 'ADFCR-7').description, 'Land AT und CH brauchen Feiertage');
+  assert.ok(/Teilabgleich/.test(db.state.jira.note));
+  assert.ok(!calls.slice(-6).some((c) => c.op === 'prune-issues'), 'Teilabgleich löscht nichts');
+});
+
+test('BigQuery-Modus: Seiten lesen aus BigQuery, Suche rechnet dort (nur die Anfrage geht an Vertex)', () => {
+  const { rt, log, calls } = bqWorld();
+  rt.abgleichEinrichten();
+  rt.__cache.advance(99999);
+  log.length = 0; calls.length = 0;
+  const dash = call(rt, 'GET', '/').ctx;
+  assert.strictEqual(dash.issues_error, null);
+  assert.ok(!log.some((l) => /rest\/agile|rest\/api\/2\/search\?jql=project/.test(l.url)), 'Übersicht ohne Jira-Abfrage der Boards');
+  const ans = call(rt, 'POST', '/wissen', { frage: ['Feiertage im Bestellvorschlag'] }).ctx.answer;
+  assert.ok(ans.sources.length, JSON.stringify(ans));
+  assert.ok(ans.sources.some((s) => s.source === 'confluence' && s.id === '123456'), JSON.stringify(ans.sources.map((s) => s.id)));
+  const embeds = log.filter((l) => /:predict$/.test(l.url)).map((l) => JSON.parse(l.req.payload).instances.length);
+  assert.deepStrictEqual(embeds, [1, 1], 'Verbindungstest und die Frage, sonst nichts');
+  assert.ok(calls.some((c) => c.op === 'vector-search'));
+  const admin = call(rt, 'GET', '/admin').ctx;
+  assert.ok(admin.checks.some((c) => c[0] === 'Abgleich Jira' && c[1] === true), JSON.stringify(admin.checks));
+});
+
+test('BigQuery-Sperre: nur eigener Datensatz, kein DROP/TRUNCATE/ALTER, eine Anweisung, nichts geht raus', () => {
+  const { rt, calls } = bqWorld();
+  const bq = new rt.BigQueryClient(rt.loadSettings());
+  const bad = ['DROP TABLE `mein-projekt-123.reqalign.issues`', 'TRUNCATE TABLE `mein-projekt-123.reqalign.issues`',
+    'DELETE FROM `anderes-projekt.daten.kunden` WHERE true', 'SELECT * FROM `mein-projekt-123.anderer.issues`',
+    'DELETE FROM `mein-projekt-123.reqalign.issues` WHERE true; DROP TABLE `mein-projekt-123.reqalign.pages`',
+    'CREATE OR REPLACE TABLE `mein-projekt-123.reqalign.x` AS SELECT 1', 'ALTER TABLE `mein-projekt-123.reqalign.issues` ADD COLUMN x STRING',
+    'GRANT `roles/bigquery.dataViewer` ON TABLE `mein-projekt-123.reqalign.issues` TO "user:x@y.de"', 'UPDATE issues SET key = 1',
+    'DELETE FROM issues WHERE true'];
+  bad.forEach((sql) => assert.throws(() => bq.query(sql), (e) => e instanceof rt.WriteDisabled && /BigQuery-Sperre/.test(e.message), sql));
+  assert.strictEqual(calls.length, 0);
+  assert.throws(() => rt.requestJson('POST', 'https://bigquery.googleapis.com/bigquery/v2/projects/p/datasets', { json: {} }), rt.WriteDisabled);
+  assert.throws(() => rt.requestJson('POST', 'https://bigquery.googleapis.com/bigquery/v2/projects/p/queries/x', { json: {} }), rt.WriteDisabled);
+  assert.throws(() => rt.loadSettings() && new rt.BigQueryClient(Object.assign(rt.loadSettings(), { bqDataset: 'a.b' })), /BQ_DATASET/);
+});
+
+test('BigQuery-Abgleich: fällt Jira aus, läuft Confluence trotzdem; der Stand nennt den Fehler', () => {
+  const db = { issues: [], pages: [], state: {} };
+  const drive = { ordner1: [{ name: 'Seite_555.html', updated: new Date('2026-11-01T08:00:00Z'), text: EXPORT_HTML('Seite', 'Inhalt der Seite') }] };
+  const rt = createRuntime({ scriptProperties: BQ, email: 'chris@firma.de', drive,
+    fetch: (url, req) => (url.indexOf('jira.firma.de') >= 0 ? { code: 503, text: '' } : url.startsWith('https://bigquery.googleapis.com/')
+      ? fakeBigQuery(db, [])(url, req) : fakeSystems([])(url, req)) });
+  const rep = rt.abgleichVoll();
+  assert.strictEqual(rep.ok, false);
+  assert.strictEqual(db.state.jira.ok, false);
+  assert.ok(/HTTP 503/.test(db.state.jira.note), db.state.jira.note);
+  assert.strictEqual(db.state.confluence.ok, true, 'Confluence lief trotzdem');
+  assert.deepStrictEqual(db.pages.map((p) => p.id), ['555']);
 });
 
 console.log(failed ? '\n' + failed + ' Test(s) fehlgeschlagen' : '\nAlle Tests bestanden');

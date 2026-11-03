@@ -122,7 +122,11 @@ var PROPERTY_DEFAULTS = {
   SERVICENOW_TOKEN: 'PLATZHALTER-servicenow-token',
   DOCS_FOLDER_ID: '',                  // optional: Drive-Ordner mit Markdown-Dateien (Anleitungen, Change Log)
   USER_ROLES: '',                      // optional: JSON {"mail@firma.de": "INT"}
-  CACHE_MINUTES: '30'                  // so lange gelten Listen aus Jira/Confluence/ServiceNow (1 bis 360)
+  CACHE_MINUTES: '',                   // leer = 30 Minuten (mit BigQuery 6 Stunden); sonst 1 bis 360
+  BQ_DATASET: '',                      // optional: eigener BigQuery-Datensatz (z. B. reqalign); schaltet den Abgleich ein
+  BQ_PROJECT: '',                      // leer = VERTEX_PROJECT_ID
+  BQ_LOCATION: 'EU',
+  CONFLUENCE_EXPORT_FOLDER_ID: ''      // optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word)
 };
 
 /** Einmal im Editor ausführen: legt alle Script Properties mit Platzhaltern an (vorhandene bleiben). */
@@ -227,6 +231,10 @@ function loadSettings(props) {
     servicenowUrl: baseUrl_(prop_(props, 'SERVICENOW_URL')),
     servicenowToken: prop_(props, 'SERVICENOW_TOKEN'),
     docsFolderId: prop_(props, 'DOCS_FOLDER_ID'),
+    bqDataset: prop_(props, 'BQ_DATASET'),
+    bqProject: prop_(props, 'BQ_PROJECT') || project,
+    bqLocation: prop_(props, 'BQ_LOCATION') || 'EU',
+    confluenceExportFolderId: prop_(props, 'CONFLUENCE_EXPORT_FOLDER_ID'),
     userRoles: userRoles
   };
 }

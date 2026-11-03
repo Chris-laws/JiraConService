@@ -57,6 +57,10 @@ function memoryCache(stats) {
   };
 }
 
+function fakeBlob(name, text) {
+  return { getName: () => name, getDataAsString: () => text, setContentType: () => {} };
+}
+
 /**
  * Erzeugt eine frische Laufzeit. options.scriptProperties: Script Properties; options.email: angemeldete Person;
  * options.fetch(url, req) → {code, text}: Nachbildung von UrlFetchApp.fetch.
@@ -67,6 +71,7 @@ function createRuntime(options) {
   const userProps = memoryProperties({});
   const cache = options.cache || memoryCache(options.cacheStats);
   const logs = [];
+  const triggers = [];
   const sandbox = {
     console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push(a.join(' ')), warn: () => {} },
     Logger: { log: (m) => logs.push(String(m)) },
@@ -76,7 +81,17 @@ function createRuntime(options) {
       getActiveUser: () => ({ getEmail: () => options.email || '' }),
       getScriptTimeZone: () => 'Europe/Berlin',
     },
-    ScriptApp: { getOAuthToken: () => options.oauthToken || 'test-token' },
+    ScriptApp: {
+      getOAuthToken: () => options.oauthToken || 'test-token',
+      getProjectTriggers: () => triggers.slice(),
+      deleteTrigger: (t) => { const i = triggers.indexOf(t); if (i >= 0) triggers.splice(i, 1); },
+      newTrigger: (fn) => {
+        const t = { fn, minutes: null, getHandlerFunction: () => fn };
+        const b = { timeBased: () => b, everyMinutes: (m) => { t.minutes = m; return b; }, create: () => { triggers.push(t); return t; } };
+        return b;
+      },
+    },
+    LockService: { getScriptLock: () => ({ tryLock: () => !options.lockBusy, releaseLock: () => {} }) },
     UrlFetchApp: {
       fetch: (url, req) => {
         if (!options.fetch) throw new Error('Kein Netz in der lokalen Laufzeit: ' + url.split('?')[0]);
@@ -107,16 +122,33 @@ function createRuntime(options) {
       base64Encode: (bytes) => Buffer.from(bytes.map((b) => (b + 256) % 256)).toString('base64'),
       base64Decode: (text) => Array.from(Buffer.from(text, 'base64')).map((b) => (b > 127 ? b - 256 : b)),
       sleep: () => {},
+      // Nachbildung: ein „ZIP“ ist hier ein Blob mit entries [{name, text}].
+      unzip: (blob) => (blob._entries || []).map((e) => fakeBlob(e.name, e.text)),
       DigestAlgorithm: { SHA_256: 'SHA_256' },
       Charset: { UTF_8: 'UTF_8' },
     },
     HtmlService: {},
-    DriveApp: { getFolderById: () => { throw new Error('Drive ist lokal nicht verfügbar'); } },
+    DriveApp: {
+      // options.drive = { ordnerId: [{name, updated, text} | {name, updated, entries}] }
+      getFolderById: (id) => {
+        if (!options.drive || !options.drive[id]) throw new Error('Drive ist lokal nicht verfügbar');
+        return { getFiles: () => {
+          const list = options.drive[id].slice();
+          return { hasNext: () => list.length > 0, next: () => {
+            const f = list.shift();
+            const blob = fakeBlob(f.name, f.text || '');
+            blob._entries = f.entries;
+            return { getName: () => f.name, getLastUpdated: () => f.updated || new Date(0), getBlob: () => blob };
+          } };
+        } };
+      },
+    },
   };
   vm.createContext(sandbox);
   const files = options.codeFiles || fs.readdirSync(SRC).filter((f) => f.endsWith('.gs')).sort().map((f) => path.join(SRC, f));
   for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), sandbox, { filename: path.basename(f) });
   sandbox.__logs = logs;
+  sandbox.__triggers = triggers;
   sandbox.__cache = cache;
   sandbox.__userProps = userProps;
   return sandbox;

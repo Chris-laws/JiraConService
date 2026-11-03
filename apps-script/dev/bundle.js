@@ -26,7 +26,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 // MockData.gs (Testdaten) wird nie ausgeliefert: die ausgelieferte Fassung kennt nur echte Daten.
 const DEV_ONLY = ['MockData.gs'];
-const ORDER = ['Code', 'Config', 'Util', 'Adapters', 'Vertex', 'Services', 'Container', 'TicketFlow', 'Views', 'Api'];
+const ORDER = ['Code', 'Config', 'Util', 'Adapters', 'Vertex', 'BigQuery', 'Services', 'Container', 'TicketFlow', 'Views', 'Api'];
 const gs = fs.readdirSync(SRC).filter((f) => f.endsWith('.gs') && DEV_ONLY.indexOf(f) < 0).map((f) => f.slice(0, -3));
 const missing = gs.filter((n) => ORDER.indexOf(n) < 0);
 if (missing.length) throw new Error('In ORDER fehlen: ' + missing.join(', '));

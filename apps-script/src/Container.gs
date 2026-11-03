@@ -7,7 +7,15 @@ function buildContainer(settings) {
   var s = settings || loadSettings();
   var c = { settings: s, notices: [] };
 
-  if (s.dataSource === 'live') {
+  if (s.dataSource === 'live' && s.bqDataset) {
+    // BigQuery-Modus: die Seiten lesen den Stand des letzten Abgleichs (BigQuery.gs), nicht Jira/Confluence direkt.
+    c.bq = new BigQueryClient(s);
+    c.jira = new CachedJira(new BigQueryJira(c.bq, new JiraRestReader(s)));
+    c.jiraWriter = new ReadOnlyJiraWriter();
+    c.confluence = new CachedConfluence(new BigQueryConfluence(c.bq));
+    c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
+    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new EmptyDocuments();
+  } else if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
     c.jiraWriter = new ReadOnlyJiraWriter();
     c.confluence = new CachedConfluence(new ConfluenceRest(s));
@@ -32,7 +40,11 @@ function buildContainer(settings) {
     Object.defineProperty(c, name, { get: function () { if (!(name in memo)) memo[name] = make(); return memo[name]; } });
   }
   lazy('thresholds', function () { return thresholdsFor(c.embedder.name); });
-  lazy('index', function () { return buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents, c.notices); });
+  var memoryIndex = function () {
+    if (!memo.memoryIndex) memo.memoryIndex = buildKnowledgeIndex(c.jira, c.confluence, c.embedder, c.documents, c.notices);
+    return memo.memoryIndex;
+  };
+  lazy('index', function () { return c.bq && s.embeddings === 'vertex' ? new BigQueryIndex(c, memoryIndex) : memoryIndex(); });
   lazy('ticketWriter', function () { return new TicketWriter(c.llm); });
   lazy('priorityAdvisor', function () { return new PriorityAdvisor(); });
   lazy('classifier', function () { return new StreamClassifier(c.embedder, c.thresholds); });

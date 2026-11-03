@@ -107,6 +107,7 @@ SCOPES_ALLOWED = {
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/script.scriptapp",  # nur für den Zeitauslöser des BigQuery-Abgleichs
 }
 
 
@@ -119,7 +120,7 @@ def _readonly_files(src) -> list[str]:
         if "UrlFetchApp." in text and path.name not in ("Adapters.gs", "Vertex.gs"):
             hits.append(f"{path.name}: UrlFetchApp außerhalb von Adapters.gs/Vertex.gs")
         bad = [m.group(1) for m in re.finditer(r"requestJson(?:All)?\(\s*'(\w+)'", text) if m.group(1) != "GET"]
-        if bad and path.name != "Vertex.gs":
+        if bad and path.name not in ("Vertex.gs", "BigQuery.gs"):
             hits.append(f"{path.name}: requestJson mit {', '.join(bad)} an Jira/Confluence/ServiceNow")
         if re.search(r"method:\s*'(put|patch|delete)'", text, re.I):
             hits.append(f"{path.name}: PUT/PATCH/DELETE im Code")
@@ -139,6 +140,24 @@ def _readonly_adapters(src) -> list[str]:
         hits.append("Adapters.gs: Code zum Anlegen in Jira ist zurück")
     if "assertReadOnly_('POST', url);" not in (src / "Vertex.gs").read_text(encoding="utf-8"):
         hits.append("Vertex.gs: paralleles Einbetten ohne assertReadOnly_")
+    hits += _readonly_bigquery(src)
+    return hits
+
+
+def _readonly_bigquery(src) -> list[str]:
+    """BigQuery: jede Anweisung geht vorher durch assertOwnDataset_ (nur eigener Datensatz, kein DROP & Co.)."""
+    path = src / "BigQuery.gs"
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    hits = []
+    posts = [m.start() for m in re.finditer(r"requestJson\(\s*'POST'", text)]
+    query = text.find("BigQueryClient.prototype.query = function")
+    guard = text.find("assertOwnDataset_(sql, this.project, this.dataset);", query)
+    if len(posts) != 1 or query < 0 or not (query < guard < posts[0]):
+        hits.append("BigQuery.gs: POST nur in BigQueryClient.query und erst nach assertOwnDataset_")
+    if re.search(r"\b(DROP|TRUNCATE)\s+(TABLE|SCHEMA)", text, re.I):
+        hits.append("BigQuery.gs: DROP/TRUNCATE im Code")
     return hits
 
 

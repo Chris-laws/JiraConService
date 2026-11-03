@@ -102,7 +102,10 @@ besten Textstellen der Quellen.
 | `SERVICENOW_URL`, `SERVICENOW_TOKEN` | ServiceNow-Table-API für Incidents und Changes |
 | `DOCS_FOLDER_ID` | Optional: Drive-Ordner mit Markdown-Dateien für Anleitungen, Schulungen, Change Log |
 | `USER_ROLES` | Optional: Rollen als JSON, z. B. `{"vorname.nachname@firma.de": "INT"}` |
-| `CACHE_MINUTES` | Wie lange Listen aus Jira, Confluence und ServiceNow gelten (Standard 30, 1 bis 360). Länger = schneller, aber älterer Stand |
+| `CACHE_MINUTES` | Wie lange Listen aus Jira, Confluence und ServiceNow gelten (leer: 30 Minuten, mit BigQuery 6 Stunden; sonst 1 bis 360) |
+| `BQ_DATASET` | Optional: eigener BigQuery-Datensatz (z. B. `reqalign`). Schaltet den Abgleich ein, siehe „BigQuery“ |
+| `BQ_PROJECT`, `BQ_LOCATION` | Projekt (leer = `VERTEX_PROJECT_ID`) und Ort (Standard `EU`) des Datensatzes |
+| `CONFLUENCE_EXPORT_FOLDER_ID` | Optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word) |
 | `LLM_DAILY_LIMIT` | KI-Aufrufe je Person und Tag (Standard 200, `0` = kein Limit). Danach rechnet die App mit Regeln weiter und zeigt einen Hinweis |
 
 Werte, die mit `PLATZHALTER` beginnen, gelten als nicht gesetzt. Streams, Epics, Prioritäten, Lebenszyklus und
@@ -114,6 +117,35 @@ Eintrag in `STREAMS`.
 1. PATs und URLs in die Skripteigenschaften eintragen. Keine neue Bereitstellung nötig, Eigenschaften gelten sofort.
 2. Ist ein System nicht erreichbar oder fehlt ein PAT, zeigt die jeweilige Seite den Grund im Block an. Die übrigen
    Seiten laufen weiter.
+
+## BigQuery (empfohlen ab mehreren Ländern)
+
+Ohne BigQuery fragt jede Seite Jira direkt (mit Cache). Mit `BQ_DATASET` gleicht ein Zeitauslöser alle 15 Minuten
+ab und die Seiten lesen nur noch aus BigQuery:
+
+- **Jira:** Teilabgleich (nur seit dem letzten Lauf geänderte Tickets), einmal am Tag Vollabgleich, der auch
+  gelöschte oder verschobene Tickets entfernt. Jira wird dabei nur gelesen (GET).
+- **Confluence:** Confluence ist von Google aus oft nicht erreichbar (Anmeldeseite vor der API). Deshalb liest der
+  Abgleich einen Export aus einem Drive-Ordner: Bereich exportieren als HTML (ZIP, braucht Bereichs-Admin) oder
+  einzelne Seiten als Word (`.doc`) oder HTML. Neuer Export in den Ordner = beim nächsten Lauf drin; Seiten, die
+  im Ordner fehlen, fliegen raus.
+- **Vektoren:** Für neue oder geänderte Texte rechnet Vertex beim Abgleich die Embeddings, BigQuery speichert sie.
+  Eine Suche bettet nur noch die Anfrage ein, die Ähnlichkeit rechnet BigQuery (`ML.DISTANCE`).
+- **Sicherheit:** Einzige zusätzliche POST-Adresse ist der Abfrage-Endpunkt von BigQuery. Jede Anweisung muss im
+  eigenen Datensatz bleiben (kein DROP, TRUNCATE, ALTER, GRANT, eine Anweisung je Aufruf); Daten gehen nur als
+  Parameter in die Abfrage.
+
+Einrichten:
+
+1. In Google Cloud (Projekt wie `VERTEX_PROJECT_ID`) braucht die bereitstellende Person die Rollen
+   **BigQuery-Nutzer** (Jobs ausführen, Datensatz anlegen) und **BigQuery-Dateneditor**. Darf sie keine Datensätze
+   anlegen, legt jemand den Datensatz einmal in der Konsole an (Ort `EU`).
+2. Skripteigenschaften: `BQ_DATASET` (z. B. `reqalign`), optional `CONFLUENCE_EXPORT_FOLDER_ID`.
+3. Im Editor einmal `abgleichEinrichten` ausführen und die neue Berechtigung (Zeitauslöser) erlauben. Das legt die
+   Tabellen an, gleicht einmal komplett ab und richtet den Auslöser ein. Danach neue Bereitstellung.
+4. Stand des Abgleichs: Admin-Seite. Sofort neu abgleichen: `abgleichVoll` im Editor.
+
+„Meine Tickets“ fragt weiter direkt in Jira (immer aktuell, kleine Abfrage je Person).
 
 ## Nur lesen
 

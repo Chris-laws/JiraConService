@@ -339,6 +339,21 @@ function adminPage_(req) {
     return WAITING.indexOf(upper(i.status)) >= 0 && Math.floor(daysBetween(now, i.updated)) > STALE_DAYS;
   }), function (i) { return i.updated; });
   var mock = c.settings.dataSource === 'mock';
+  var checks = [
+    ['Datenquelle', !mock, !mock ? (c.bq ? 'Live über BigQuery (Datensatz ' + c.settings.bqDataset + ')' : 'Live-Modus') : 'Lokaler Modus'],
+    ['Jira lesen', error === null, error || 'Erreichbar'],
+    ['KI', c.llm.available, c.llm.available ? 'Aktiv' : 'Offline, Antworten direkt aus den Quellen'],
+    ['Jira schreiben', false, 'Gesperrt, nur Lesen']
+  ];
+  if (c.bq) {
+    var sync = block_(function () { return syncStatus_(c.bq); });
+    if (sync[1]) checks.push(['Abgleich', false, sync[1]]);
+    else if (!sync[0].length) checks.push(['Abgleich', false, 'Noch nie gelaufen. Im Editor abgleichEinrichten ausführen.']);
+    (sync[0] || []).forEach(function (r) {
+      checks.push(['Abgleich ' + (r.source === 'jira' ? 'Jira' : 'Confluence'), r.ok,
+        (r.last_run ? formatLocal_(r.last_run) + ': ' : '') + r.note]);
+    });
+  }
   return render_(req, 'admin', 'admin', {
     allowed: me.role === ADMIN_ROLE,
     error: error,
@@ -347,12 +362,7 @@ function adminPage_(req) {
     stale: stale.map(function (i) { return { issue: i, age: Math.floor(daysBetween(now, i.updated)) }; }),
     stale_days: STALE_DAYS,
     streams: activeStreams().length,
-    checks: [
-      ['Datenquelle', !mock, !mock ? 'Live-Modus' : 'Lokaler Modus'],
-      ['Jira lesen', error === null, error || 'Erreichbar'],
-      ['KI', c.llm.available, c.llm.available ? 'Aktiv' : 'Offline, Antworten direkt aus den Quellen'],
-      ['Jira schreiben', false, 'Gesperrt, nur Lesen']
-    ]
+    checks: checks
   }, { issues: issues });
 }
 

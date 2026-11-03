@@ -23,15 +23,18 @@
 
 /**
  * Nur-Lesen-Sperre, fest im Code (keine Skripteigenschaft kann sie lockern): Jira, Confluence, ServiceNow und jede
- * andere Adresse bekommen ausschließlich GET. Einzige Ausnahme ist Vertex AI (Gemini und Embeddings), das Anfragen
- * technisch per POST erwartet; dorthin gehen nur Texte zum Auswerten, nie etwas an Jira & Co.
+ * andere Adresse bekommen ausschließlich GET. Ausnahmen: Vertex AI (Gemini und Embeddings), das Anfragen technisch
+ * per POST erwartet, und der Abfrage-Endpunkt von BigQuery (nur für den eigenen Datensatz, siehe BigQuery.gs).
  * Jeder HTTP-Aufruf der App läuft hier durch (requestJson und das parallele Einbetten in Vertex.gs).
  */
 var READ_ONLY_POST_HOST_ = /^https:\/\/([a-z0-9-]+-)?aiplatform\.googleapis\.com\//;
+// BigQuery: nur der Abfrage-Endpunkt. Was dort laufen darf (nur der eigene Datensatz), prüft assertOwnDataset_ in BigQuery.gs.
+var BIGQUERY_QUERY_URL_ = /^https:\/\/bigquery\.googleapis\.com\/bigquery\/v2\/projects\/[a-z0-9.:-]+\/queries$/;
 function assertReadOnly_(method, url) {
   var m = String(method || '').toUpperCase();
   if (m === 'GET') return;
   if (m === 'POST' && READ_ONLY_POST_HOST_.test(String(url))) return;
+  if (m === 'POST' && BIGQUERY_QUERY_URL_.test(String(url))) return;
   throw new WriteDisabled('Nur-Lesen-Sperre: ' + m + ' an ' + String(url).split('?')[0].replace(/^(https?:\/\/[^/]+).*$/, '$1') + ' ist verboten.');
 }
 
@@ -204,6 +207,7 @@ function JiraRestReader(s) {
   this.s = s;
   this.fields = JIRA_FIELDS_ + ',' + SETTINGS.jira.epic_link_field;
   this.max = 500;
+  this.since = null; // Minuten: nur Tickets, die sich seitdem geändert haben (Teilabgleich nach BigQuery)
 }
 JiraRestReader.prototype.base_ = function () { return requireUrl_(this.s.jiraUrl, 'JIRA_URL'); };
 JiraRestReader.prototype.paged_ = function (path, params) {
@@ -236,8 +240,10 @@ JiraRestReader.prototype.paged_ = function (path, params) {
   }
   return result;
 };
-JiraRestReader.prototype.search_ = function (jql) { return this.paged_('/rest/api/2/search', { jql: jql }); };
-JiraRestReader.prototype.board_ = function (id) { return this.paged_('/rest/agile/1.0/board/' + id + '/issue', {}); };
+JiraRestReader.prototype.search_ = function (jql) { return this.paged_('/rest/api/2/search', { jql: sinceJql_(jql, this.since) }); };
+JiraRestReader.prototype.board_ = function (id) {
+  return this.paged_('/rest/agile/1.0/board/' + id + '/issue', this.since ? { jql: 'updated >= -' + this.since + 'm' } : {});
+};
 JiraRestReader.prototype.toIssue_ = function (raw, base) {
   var f = raw.fields || {};
   var components = f.components || [];
@@ -275,10 +281,14 @@ JiraRestReader.prototype.searchIssues = function () {
   }
   return this.search_(this.s.jiraJql);
 };
+/** Country Report: Board, sonst JQL. */
+JiraRestReader.prototype.countryIssues = function () {
+  return this.s.jiraAdfcrBoardId !== null ? this.board_(this.s.jiraAdfcrBoardId)
+    : this.s.jiraAdfcrJql ? this.search_(this.s.jiraAdfcrJql) : [];
+};
 /** Vier Stream-Boards plus Country Report, nach Jira-Key entdoppelt. */
 JiraRestReader.prototype.dashboardIssues = function () {
-  var country = this.s.jiraAdfcrBoardId !== null ? this.board_(this.s.jiraAdfcrBoardId)
-    : this.s.jiraAdfcrJql ? this.search_(this.s.jiraAdfcrJql) : [];
+  var country = this.countryIssues();
   var byKey = {}, order = [];
   country.forEach(function (i) {
     if (!byKey[i.key]) order.push(i.key);
@@ -293,6 +303,13 @@ JiraRestReader.prototype.issuesByReporter = function (email) {
   var safe = String(email).replace(/"/g, '');
   return this.search_('reporter = "' + safe + '" ORDER BY updated DESC');
 };
+
+/** JQL um „nur seit N Minuten geändert“ ergänzen; ORDER BY bleibt am Ende. */
+function sinceJql_(jql, minutes) {
+  if (!minutes) return jql;
+  var m = /^([\s\S]*?)(\s+ORDER\s+BY\s[\s\S]*)?$/i.exec(String(jql));
+  return '(' + m[1].trim() + ') AND updated >= -' + Math.max(1, Math.ceil(minutes)) + 'm' + (m[2] || '');
+}
 
 /**
  * Diese Fassung liest nur. Es gibt keinen Code, der in Jira etwas anlegt oder ändert; der „Writer“ sagt immer nein.
@@ -452,8 +469,15 @@ EmptyDocuments.prototype.documents = function () { return []; };
 var CACHE_SECONDS_ = 1800; // Standard 30 Minuten; Skripteigenschaft CACHE_MINUTES (1 bis 360) ändert das
 function cacheSeconds_() {
   var m = 0;
-  try { m = parseInt(PropertiesService.getScriptProperties().getProperty('CACHE_MINUTES') || '', 10); } catch (e) { m = 0; }
-  return m >= 1 ? Math.min(m, 360) * 60 : CACHE_SECONDS_;
+  var bq = false;
+  try {
+    var props = PropertiesService.getScriptProperties();
+    m = parseInt(props.getProperty('CACHE_MINUTES') || '', 10);
+    bq = !!props.getProperty('BQ_DATASET');
+  } catch (e) { m = 0; }
+  if (m >= 1) return Math.min(m, 360) * 60;
+  // Mit BigQuery wirft jeder Abgleich den Cache ohnehin weg und füllt ihn neu: dann gilt er bis zu 6 Stunden.
+  return bq ? 21600 : CACHE_SECONDS_;
 }
 
 /** Versions-Token je Datenquelle: ein Schreibvorgang setzt ein neues, alte Cache-Stände gelten dann nicht mehr. */
