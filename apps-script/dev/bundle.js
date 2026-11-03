@@ -24,8 +24,10 @@ if (APP_NAME !== undefined && (!arg('out') || OUT === path.resolve(__dirname, '.
 const named = (text) => (APP_NAME ? text.replace(/'ReqAlign'/g, JSON.stringify(APP_NAME).replace(/^"|"$/g, "'")) : text);
 fs.mkdirSync(OUT, { recursive: true });
 
-const ORDER = ['Code', 'Config', 'Util', 'Adapters', 'Vertex', 'Services', 'Container', 'TicketFlow', 'Views', 'Api', 'MockData'];
-const gs = fs.readdirSync(SRC).filter((f) => f.endsWith('.gs')).map((f) => f.slice(0, -3));
+// MockData.gs (Testdaten) wird nie ausgeliefert: die ausgelieferte Fassung kennt nur echte Daten.
+const DEV_ONLY = ['MockData.gs'];
+const ORDER = ['Code', 'Config', 'Util', 'Adapters', 'Vertex', 'Services', 'Container', 'TicketFlow', 'Views', 'Api'];
+const gs = fs.readdirSync(SRC).filter((f) => f.endsWith('.gs') && DEV_ONLY.indexOf(f) < 0).map((f) => f.slice(0, -3));
 const missing = gs.filter((n) => ORDER.indexOf(n) < 0);
 if (missing.length) throw new Error('In ORDER fehlen: ' + missing.join(', '));
 
@@ -44,7 +46,7 @@ if (FILES) {
   const dir = path.resolve(FILES);
   if (dir === path.resolve(SRC)) throw new Error('--files darf nicht src/ sein');
   fs.mkdirSync(dir, { recursive: true });
-  fs.readdirSync(SRC).forEach((f) => {
+  fs.readdirSync(SRC).filter((f) => DEV_ONLY.indexOf(f) < 0).forEach((f) => {
     const text = fs.readFileSync(path.join(SRC, f), 'utf8');
     fs.writeFileSync(path.join(dir, f), f.endsWith('.html') ? stripHtml(text) : f.endsWith('.gs') ? named(text) : text);
   });

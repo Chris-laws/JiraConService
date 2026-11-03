@@ -9,13 +9,13 @@ function buildContainer(settings) {
 
   if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
-    c.jiraWriter = new JiraRestWriter(s);
+    c.jiraWriter = new ReadOnlyJiraWriter();
     c.confluence = new CachedConfluence(new ConfluenceRest(s));
     c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
-    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new MockDocuments();
+    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new EmptyDocuments();
   } else {
     c.jira = new MockJira();
-    c.jiraWriter = new MockJiraWriter(s.jiraWriteEnabled);
+    c.jiraWriter = new ReadOnlyJiraWriter();
     c.confluence = new MockConfluence();
     c.servicenow = new MockServiceNow();
     c.documents = s.docsFolderId ? new DriveDocuments(s.docsFolderId) : new MockDocuments();

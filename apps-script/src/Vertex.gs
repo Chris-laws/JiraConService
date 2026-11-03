@@ -133,6 +133,7 @@ VertexEmbedder.prototype.embed = function (texts) {
   var chunks = [];
   for (var start = 0; start < missing.length; start += this.batch) chunks.push(missing.slice(start, start + this.batch));
   var request = function (chunk) {
+    assertReadOnly_('POST', url);
     return { url: url, method: 'post', headers: vertexHeaders(self.project), contentType: 'application/json', muteHttpExceptions: true,
       payload: JSON.stringify({ instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) }) };
   };

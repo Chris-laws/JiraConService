@@ -100,7 +100,7 @@ var STREAMS = [
  */
 var PROPERTY_DEFAULTS = {
   APP_NAME: 'ReqAlign',
-  DATA_SOURCE: 'mock',                 // mock = Testdaten, live = Jira/Confluence/ServiceNow über REST
+  DATA_SOURCE: 'live',                 // live = echte Daten aus Jira/Confluence/ServiceNow (nur lesend)
   VERTEX_PROJECT_ID: 'PLATZHALTER-gcp-projekt-id',
   VERTEX_LOCATION: 'global',
   GEMINI_MODEL: 'gemini-2.5-flash',
@@ -115,7 +115,6 @@ var PROPERTY_DEFAULTS = {
   JIRA_BOARD_REPORTING: '',
   JIRA_BOARD_ADFCR: '',
   JIRA_ADFCR_JQL: 'project = ADFCR ORDER BY updated DESC',
-  JIRA_WRITE_ENABLED: 'false',
   CONFLUENCE_URL: 'PLATZHALTER-https://confluence.example.com',
   CONFLUENCE_PAT: 'PLATZHALTER-confluence-pat',
   CONFLUENCE_SPACES: 'ADF',
@@ -161,8 +160,11 @@ function boardId_(props, key) {
 /** Liest die Einstellungen. props ist für Tests überschreibbar. */
 function loadSettings(props) {
   props = props || PropertiesService.getScriptProperties().getProperties();
-  var dataSource = String(props.DATA_SOURCE || 'mock').trim().toLowerCase();
-  if (dataSource !== 'mock' && dataSource !== 'live') throw new ConfigError('DATA_SOURCE muss mock oder live sein');
+  var dataSource = String(props.DATA_SOURCE || 'live').trim().toLowerCase();
+  if (dataSource !== 'mock' && dataSource !== 'live') throw new ConfigError('DATA_SOURCE muss live sein');
+  if (dataSource === 'mock' && typeof MOCK_DATA === 'undefined') {
+    throw new ConfigError('Testdaten sind in dieser Fassung nicht enthalten. DATA_SOURCE auf live setzen oder löschen.');
+  }
 
   var streamBoards = {};
   ['disposition', 'logistik', 'stammdaten', 'reporting'].forEach(function (s) {
@@ -193,7 +195,6 @@ function loadSettings(props) {
   return {
     appName: prop_(props, 'APP_NAME') || 'ReqAlign',
     dataSource: dataSource,
-    jiraWriteEnabled: /^(1|true|yes|ja|on)$/i.test(String(props.JIRA_WRITE_ENABLED || '')),
     vertexProjectId: project,
     vertexLocation: prop_(props, 'VERTEX_LOCATION') || 'global',
     geminiModel: prop_(props, 'GEMINI_MODEL') || 'gemini-2.5-flash',

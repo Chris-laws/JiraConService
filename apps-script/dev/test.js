@@ -30,7 +30,7 @@ test('Ticketentwurf mit zwei Streams wird gesperrt und schlägt Aufteilung vor',
   assert.ok(ctx.result.duplicates.some((d) => d.level === 'duplicate'));
 });
 
-test('Maske prüfen und Anlegen ist ohne Freigabe abgeschaltet', () => {
+test('Maske prüfen: Anlegen ist gesperrt, nur Text zum Kopieren', () => {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
   const draft = call(rt, 'GET', '/ticket', { beispiel: ['0'] }).ctx.result.form;
   const fields = {};
@@ -39,17 +39,8 @@ test('Maske prüfen und Anlegen ist ohne Freigabe abgeschaltet', () => {
   fields.reviewed = ['1'];
   fields.action = ['anlegen'];
   const ctx = call(rt, 'POST', '/ticket/pruefen', fields).ctx;
-  assert.strictEqual(ctx.result.blocked, 'Anlegen in Jira ist im Prototyp abgeschaltet. Text kopieren und in Jira einfügen.');
+  assert.strictEqual(ctx.result.blocked, 'Diese Fassung liest nur. Text kopieren und in Jira einfügen.');
   assert.ok(ctx.result.markup.indexOf('h3. 3. Ausgangssituation\nHeute wird der Mindestbestand manuell überschrieben.') >= 0);
-});
-
-test('Anlegen mit Freigabe liefert einen Schlüssel', () => {
-  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock', JIRA_WRITE_ENABLED: 'true' } });
-  const draft = call(rt, 'GET', '/ticket', { beispiel: ['0'] }).ctx.result.form;
-  const fields = {};
-  Object.keys(draft).forEach((k) => { fields[k] = [Array.isArray(draft[k]) ? draft[k].join('\n') : String(draft[k])]; });
-  Object.assign(fields, { current_state: ['Heute manuell.'], reviewed: ['1'], action: ['anlegen'] });
-  assert.strictEqual(call(rt, 'POST', '/ticket/pruefen', fields).ctx.result.created, 'MOCK-1');
 });
 
 test('Live mit Platzhaltern: Seiten zeigen den Fehler im Block statt abzustürzen', () => {
@@ -266,11 +257,52 @@ test('Netz wackelt: GET wird mit Wartezeit wiederholt, POST nicht', () => {
   const flaky = (url, req) => (req.method === 'get' && /rest\/api\/2\/search/.test(url) && fails++ < 2 ? { code: 503, text: '' } : systems(url, req));
   const rt = createRuntime({ scriptProperties: LIVE, fetch: flaky, email: 'chris@firma.de' });
   assert.strictEqual(call(rt, 'GET', '/').ctx.issues_error, null, 'nach zwei 503 klappt der dritte Versuch');
-  let posts = 0;
-  const rt2 = createRuntime({ scriptProperties: Object.assign({}, LIVE, { JIRA_WRITE_ENABLED: 'true' }),
-    fetch: (url, req) => { if (req.method === 'post' && /rest\/api\/2\/issue$/.test(url)) { posts++; return { code: 503, text: '' }; } return systems(url, req); } });
-  assert.throws(() => new rt2.JiraRestWriter(rt2.loadSettings()).createIssue({ summary: 's' }));
-  assert.strictEqual(posts, 1, 'Anlegen wird nie doppelt geschickt');
+});
+
+test('Nur lesen: kein POST/PUT/DELETE an Jira, Confluence, ServiceNow, auch nicht mit alter Schreib-Einstellung', () => {
+  const log = [];
+  const systems = fakeSystems(log);
+  const methods = [];
+  const props = Object.assign({}, LIVE, { JIRA_WRITE_ENABLED: 'true' });
+  const rt = createRuntime({ scriptProperties: props, email: 'chris@firma.de',
+    fetch: (url, req) => { methods.push([String(req.method).toUpperCase(), url]); return systems(url, req); } });
+  // alle Seiten und alle Formulare, auch „anlegen“
+  for (const [m, p] of PAGES) call(rt, m, p);
+  call(rt, 'GET', '/bugs/INC1');
+  call(rt, 'POST', '/bugs/INC1/erklaerung', {});
+  call(rt, 'POST', '/wissen', { frage: ['Bestellvorschlag Feiertage'] });
+  const draft = call(rt, 'POST', '/ticket', { text: ['Der Bestellvorschlag soll Feiertage je Land berücksichtigen, damit nicht zu viel bestellt wird.'] }).ctx.result.form;
+  const fields = {};
+  Object.keys(draft).forEach((k) => { fields[k] = [Array.isArray(draft[k]) ? draft[k].join('\n') : String(draft[k])]; });
+  Object.assign(fields, { current_state: ['Heute manuell.'], reviewed: ['1'], action: ['anlegen'], stream: ['disposition'] });
+  const res = call(rt, 'POST', '/ticket/pruefen', fields).ctx.result;
+  assert.ok(!res.created, 'nichts angelegt');
+  assert.ok(methods.length > 5, 'Live-Abrufe fanden statt');
+  const writes = methods.filter(([m, u]) => m !== 'GET' && !/^https:\/\/([a-z0-9-]+-)?aiplatform\.googleapis\.com\//.test(u));
+  assert.deepStrictEqual(writes, [], 'nur GET an Jira & Co.');
+  // Die Sperre selbst: jede andere Methode an jede andere Adresse wird verweigert, bevor ein Aufruf rausgeht.
+  const before = methods.length;
+  for (const m of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const u of ['https://jira.firma.de/rest/api/2/issue', 'https://wiki.firma.de/rest/api/content', 'https://sn.firma.de/api/now/table/incident',
+      'https://aiplatform.googleapis.com.evil.de/x', 'https://evil.de/aiplatform.googleapis.com/']) {
+      assert.throws(() => rt.requestJson(m, u, { json: {} }), (e) => e instanceof rt.WriteDisabled && /Nur-Lesen-Sperre/.test(e.message), m + ' ' + u);
+    }
+  }
+  assert.strictEqual(methods.length, before, 'verweigerte Aufrufe gehen nicht raus');
+  assert.throws(() => new rt.ReadOnlyJiraWriter().createIssue({}), rt.WriteDisabled);
+  assert.strictEqual(typeof rt.JiraRestWriter, 'undefined', 'kein Code zum Anlegen mehr');
+});
+
+test('Ausgelieferte Fassung ohne Testdaten: DATA_SOURCE=mock gibt einen klaren Fehler, Standard ist live', () => {
+  const path = require('path');
+  const bundle = [path.join(__dirname, '..', 'bundle', 'Code.gs')];
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, codeFiles: bundle });
+  assert.strictEqual(typeof rt.MOCK_DATA, 'undefined');
+  assert.throws(() => rt.loadSettings(), /Testdaten sind in dieser Fassung nicht enthalten/);
+  const live = createRuntime({ scriptProperties: {}, codeFiles: bundle });
+  assert.strictEqual(live.loadSettings().dataSource, 'live');
+  const docs = call(live, 'GET', '/dokumente');
+  assert.ok(docs.template && !docs.fatal, 'Seite ohne Drive-Ordner läuft');
 });
 
 test('KI-Tageslimit je Person: danach Regel-Logik mit Hinweis', () => {
@@ -330,7 +362,7 @@ test('Gebündelte Fassung (bundle/) ist aktuell und rechnet gleich', () => {
   const before = fs.readFileSync(path.join(__dirname, '..', 'bundle', 'Code.gs'), 'utf8');
   require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'bundle.js')]);
   assert.strictEqual(fs.readFileSync(path.join(__dirname, '..', 'bundle', 'Code.gs'), 'utf8'), before, 'bundle/ war veraltet, jetzt neu erzeugt: bitte mit committen');
-  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, codeFiles: [path.join(__dirname, '..', 'bundle', 'Code.gs')] });
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' }, codeFiles: [path.join(__dirname, '..', 'bundle', 'Code.gs'), path.join(__dirname, '..', 'src', 'MockData.gs')] });
   const a = call(rt, 'GET', '/ticket', { beispiel: ['2'] }).ctx.result.markup;
   const b = call(createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } }), 'GET', '/ticket', { beispiel: ['2'] }).ctx.result.markup;
   assert.strictEqual(a, b);

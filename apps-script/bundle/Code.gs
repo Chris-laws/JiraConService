@@ -150,7 +150,7 @@ var STREAMS = [
  */
 var PROPERTY_DEFAULTS = {
   APP_NAME: 'ReqAlign',
-  DATA_SOURCE: 'mock',                 // mock = Testdaten, live = Jira/Confluence/ServiceNow über REST
+  DATA_SOURCE: 'live',                 // live = echte Daten aus Jira/Confluence/ServiceNow (nur lesend)
   VERTEX_PROJECT_ID: 'PLATZHALTER-gcp-projekt-id',
   VERTEX_LOCATION: 'global',
   GEMINI_MODEL: 'gemini-2.5-flash',
@@ -165,7 +165,6 @@ var PROPERTY_DEFAULTS = {
   JIRA_BOARD_REPORTING: '',
   JIRA_BOARD_ADFCR: '',
   JIRA_ADFCR_JQL: 'project = ADFCR ORDER BY updated DESC',
-  JIRA_WRITE_ENABLED: 'false',
   CONFLUENCE_URL: 'PLATZHALTER-https://confluence.example.com',
   CONFLUENCE_PAT: 'PLATZHALTER-confluence-pat',
   CONFLUENCE_SPACES: 'ADF',
@@ -211,8 +210,11 @@ function boardId_(props, key) {
 /** Liest die Einstellungen. props ist für Tests überschreibbar. */
 function loadSettings(props) {
   props = props || PropertiesService.getScriptProperties().getProperties();
-  var dataSource = String(props.DATA_SOURCE || 'mock').trim().toLowerCase();
-  if (dataSource !== 'mock' && dataSource !== 'live') throw new ConfigError('DATA_SOURCE muss mock oder live sein');
+  var dataSource = String(props.DATA_SOURCE || 'live').trim().toLowerCase();
+  if (dataSource !== 'mock' && dataSource !== 'live') throw new ConfigError('DATA_SOURCE muss live sein');
+  if (dataSource === 'mock' && typeof MOCK_DATA === 'undefined') {
+    throw new ConfigError('Testdaten sind in dieser Fassung nicht enthalten. DATA_SOURCE auf live setzen oder löschen.');
+  }
 
   var streamBoards = {};
   ['disposition', 'logistik', 'stammdaten', 'reporting'].forEach(function (s) {
@@ -243,7 +245,6 @@ function loadSettings(props) {
   return {
     appName: prop_(props, 'APP_NAME') || 'ReqAlign',
     dataSource: dataSource,
-    jiraWriteEnabled: /^(1|true|yes|ja|on)$/i.test(String(props.JIRA_WRITE_ENABLED || '')),
     vertexProjectId: project,
     vertexLocation: prop_(props, 'VERTEX_LOCATION') || 'global',
     geminiModel: prop_(props, 'GEMINI_MODEL') || 'gemini-2.5-flash',
@@ -548,9 +549,24 @@ function perfReset_() { PERF_ = { fetches: 0, fetchMs: 0, cacheHits: 0, cacheMis
 
 // ---------- HTTP ----------
 
+/**
+ * Nur-Lesen-Sperre, fest im Code (keine Skripteigenschaft kann sie lockern): Jira, Confluence, ServiceNow und jede
+ * andere Adresse bekommen ausschließlich GET. Einzige Ausnahme ist Vertex AI (Gemini und Embeddings), das Anfragen
+ * technisch per POST erwartet; dorthin gehen nur Texte zum Auswerten, nie etwas an Jira & Co.
+ * Jeder HTTP-Aufruf der App läuft hier durch (requestJson und das parallele Einbetten in Vertex.gs).
+ */
+var READ_ONLY_POST_HOST_ = /^https:\/\/([a-z0-9-]+-)?aiplatform\.googleapis\.com\//;
+function assertReadOnly_(method, url) {
+  var m = String(method || '').toUpperCase();
+  if (m === 'GET') return;
+  if (m === 'POST' && READ_ONLY_POST_HOST_.test(String(url))) return;
+  throw new WriteDisabled('Nur-Lesen-Sperre: ' + m + ' an ' + String(url).split('?')[0].replace(/^(https?:\/\/[^/]+).*$/, '$1') + ' ist verboten.');
+}
+
 /** Gemeinsamer HTTP-Aufruf. Fehler werden zu errorType (Standard: SourceUnavailable). */
 function requestJson(method, url, options) {
   options = options || {};
+  assertReadOnly_(method, url);
   var ErrorType = options.error || SourceUnavailable;
   var host = url.split('?')[0]; // nie Query-Parameter melden (könnten Tokens enthalten)
   if (options.params) {
@@ -713,13 +729,13 @@ JiraRestReader.prototype.issuesByReporter = function (email) {
   return this.search_('reporter = "' + safe + '" ORDER BY updated DESC');
 };
 
-function JiraRestWriter(s) { this.s = s; this.enabled = !!s.jiraWriteEnabled; }
-JiraRestWriter.prototype.createIssue = function (fields) {
-  if (!this.enabled) throw new WriteDisabled('Schreiben nach Jira ist im Prototyp abgeschaltet');
-  var data = requestJson('POST', requireUrl_(this.s.jiraUrl, 'JIRA_URL') + '/rest/api/2/issue', {
-    headers: bearer_(this.s.jiraPat), json: { fields: fields }
-  });
-  return String(data.key);
+/**
+ * Diese Fassung liest nur. Es gibt keinen Code, der in Jira etwas anlegt oder ändert; der „Writer“ sagt immer nein.
+ * Wer später schreiben will, muss hier bewusst neuen Code einbauen UND die Sperre in assertReadOnly_ lockern.
+ */
+function ReadOnlyJiraWriter() { this.enabled = false; }
+ReadOnlyJiraWriter.prototype.createIssue = function () {
+  throw new WriteDisabled('Diese Fassung liest nur. Anlegen in Jira ist gesperrt.');
 };
 
 // ---------- Confluence (Server/Data Center, PAT als Bearer) ----------
@@ -861,71 +877,9 @@ DriveDocuments.prototype.documents = function () {
   return sortBy(docs, function (d) { return d.id; });
 };
 
-// ---------- Mock-Adapter auf Basis von MockData.gs. Damit läuft alles ohne Firmennetz ----------
-
-var MOCK_JIRA_URL = 'https://jira.example.com';
-var MOCK_CONFLUENCE_URL = 'https://confluence.example.com';
-var MOCK_SERVICENOW_URL = 'https://servicenow.example.com';
-
-function MockJira() {
-  this.issues = MOCK_DATA.issues.map(function (r) {
-    return {
-      key: r.key, summary: r.summary, description: r.description, status: r.status, reporter: r.reporter,
-      updated: parseTime(r.updated), url: MOCK_JIRA_URL + '/browse/' + r.key, stream: r.stream || null,
-      epic: r.epic || null, issue_type: r.issue_type || 'Story', created: parseTime(r.created),
-      resolved: parseTime(r.resolved), board_scope: r.board_scope || r.stream || null
-    };
-  });
-}
-MockJira.prototype.searchIssues = function () { return this.issues.filter(function (i) { return i.board_scope !== 'adfcr'; }); };
-MockJira.prototype.dashboardIssues = function () { return this.issues.slice(); };
-MockJira.prototype.issuesByReporter = function (email) {
-  email = String(email).trim().toLowerCase();
-  return this.issues.filter(function (i) { return i.reporter.toLowerCase() === email; });
-};
-
-function MockJiraWriter(enabled) { this.enabled = !!enabled; this.created = 0; }
-MockJiraWriter.prototype.createIssue = function () {
-  if (!this.enabled) throw new WriteDisabled('Schreiben nach Jira ist im Prototyp abgeschaltet');
-  this.created += 1;
-  return 'MOCK-' + this.created;
-};
-
-function MockConfluence() {}
-MockConfluence.prototype.pages = function () {
-  return MOCK_DATA.pages.map(function (r) {
-    return { id: r.id, title: r.title, body: r.body, space: r.space, url: MOCK_CONFLUENCE_URL + '/pages/' + r.id };
-  });
-};
-
-function MockServiceNow() {}
-MockServiceNow.prototype.bugs = function () {
-  return MOCK_DATA.bugs.map(function (r) {
-    return {
-      number: r.number, short_description: r.short_description, description: r.description, component: r.component,
-      first_seen: parseTime(r.first_seen), url: MOCK_SERVICENOW_URL + '/incident/' + r.number,
-      priority: r.priority || '', caller: r.caller || ''
-    };
-  });
-};
-MockServiceNow.prototype.bug = function (number) {
-  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
-  if (!hit) throw new Error('Bug nicht gefunden: ' + number);
-  return hit;
-};
-MockServiceNow.prototype.changes = function () {
-  return MOCK_DATA.changes.map(function (r) {
-    return {
-      id: r.id, title: r.title, description: r.description, author: r.author, deployed_at: parseTime(r.deployed_at),
-      components: r.components.slice(), url: MOCK_SERVICENOW_URL + '/change/' + r.id, release: r.release || ''
-    };
-  });
-};
-
-function MockDocuments() {}
-MockDocuments.prototype.documents = function () {
-  return MOCK_DATA.documents.map(function (d) { return { id: d.id, title: d.title, body: d.body, kind: d.kind, url: d.url }; });
-};
+/** Ohne DOCS_FOLDER_ID: keine Anleitungen (die Seite sagt, wie man den Drive-Ordner einträgt). */
+function EmptyDocuments() {}
+EmptyDocuments.prototype.documents = function () { return []; };
 
 // ---------- Zwischenspeicher für Live-Abfragen ----------
 // Jede Seite lädt die Jira-Daten neu; für ein paar Minuten reicht der Stand aus dem Cache.
@@ -1157,6 +1111,7 @@ VertexEmbedder.prototype.embed = function (texts) {
   var chunks = [];
   for (var start = 0; start < missing.length; start += this.batch) chunks.push(missing.slice(start, start + this.batch));
   var request = function (chunk) {
+    assertReadOnly_('POST', url);
     return { url: url, method: 'post', headers: vertexHeaders(self.project), contentType: 'application/json', muteHttpExceptions: true,
       payload: JSON.stringify({ instances: chunk.map(function (i) { return { content: texts[i] || ' ' }; }) }) };
   };
@@ -1756,8 +1711,8 @@ function toJiraMarkup(draft, streamName, epicKey) {
 }
 
 /**
- * Felder für POST /rest/api/2/issue. Autor (reporter) ist die angemeldete Person, nicht das technische Konto
- * hinter dem PAT. Geschrieben wird nur, wenn JIRA_WRITE_ENABLED gesetzt ist.
+ * Ticketfelder im Format der Jira-REST-API (prüft Stream und Pflichtangaben). Autor (reporter) wäre die angemeldete
+ * Person. Diese Fassung schickt sie nie an Jira (siehe assertReadOnly_ in Adapters.gs).
  */
 function issueFields(draft, o) {
   if (o.multiStream) throw new OneStreamOnly('Das Ticket betrifft mehrere Streams. Bitte aufteilen, je Stream ein Ticket.');
@@ -1788,13 +1743,13 @@ function buildContainer(settings) {
 
   if (s.dataSource === 'live') {
     c.jira = new CachedJira(new JiraRestReader(s));
-    c.jiraWriter = new JiraRestWriter(s);
+    c.jiraWriter = new ReadOnlyJiraWriter();
     c.confluence = new CachedConfluence(new ConfluenceRest(s));
     c.servicenow = new CachedServiceNow(new ServiceNowRest(s));
-    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new MockDocuments();
+    c.documents = s.docsFolderId ? new CachedDocuments(new DriveDocuments(s.docsFolderId)) : new EmptyDocuments();
   } else {
     c.jira = new MockJira();
-    c.jiraWriter = new MockJiraWriter(s.jiraWriteEnabled);
+    c.jiraWriter = new ReadOnlyJiraWriter();
     c.confluence = new MockConfluence();
     c.servicenow = new MockServiceNow();
     c.documents = s.docsFolderId ? new DriveDocuments(s.docsFolderId) : new MockDocuments();
@@ -2034,7 +1989,7 @@ function blocked_(c, form, edited, streamName, multi, reporter, gate) {
     throw exc;
   }
   if (gate) return gate;
-  if (!c.jiraWriter.enabled) return 'Anlegen in Jira ist im Prototyp abgeschaltet. Text kopieren und in Jira einfügen.';
+  if (!c.jiraWriter.enabled) return 'Diese Fassung liest nur. Text kopieren und in Jira einfügen.';
   return null;
 }
 
@@ -2559,7 +2514,7 @@ function adminPage_(req) {
       ['Datenquelle', !mock, !mock ? 'Live-Modus' : 'Lokaler Modus'],
       ['Jira lesen', error === null, error || 'Erreichbar'],
       ['KI', c.llm.available, c.llm.available ? 'Aktiv' : 'Offline, Antworten direkt aus den Quellen'],
-      ['Jira schreiben', c.jiraWriter.enabled, c.jiraWriter.enabled ? 'Freigegeben' : 'Abgeschaltet']
+      ['Jira schreiben', false, 'Gesperrt, nur Lesen']
     ]
   }, { issues: issues });
 }
@@ -2684,921 +2639,3 @@ function switchLanguage_(req) {
   userProps_().setProperty('lang', last_(p, 'lang') === 'en' ? 'en' : 'de');
   return { redirect: safeInternalRedirect(last_(p, 'back', '/')) };
 }
-
-// ======================================================= MockData.gs
-
-/**
- * Testdaten für den Modus DATA_SOURCE=mock (Standard). Erfundene Tickets, Seiten, Bugs und Changes, damit die
- * Oberfläche ohne Firmennetz und ohne PATs vollständig läuft. Zeiten sind Wanduhr-Zeiten (ISO ohne Zeitzone).
- */
-var MOCK_DATA = {
- "issues": [
-  {
-   "key": "ADF-1012",
-   "summary": "Bestellvorschlag berücksichtigt Feiertage nicht",
-   "description": "Der automatische Bestellvorschlag plant an regionalen Feiertagen normale Absatzmengen ein. Prognose soll Feiertagskalender je Land berücksichtigen.",
-   "status": "DEVELOPMENT BACKLOG",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-10-20T09:14:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-10-10T09:14:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1015",
-   "summary": "Mindestbestand für Aktionsartikel manuell überschreiben",
-   "description": "Disponenten möchten den Mindestbestand für Aktionsartikel temporär überschreiben, damit die Filiale zum Aktionsstart ausreichend Bestand hat.",
-   "status": "VALIDATION INT",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-10-22T13:02:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-10-02T10:02:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1021",
-   "summary": "Wareneingang: Teillieferungen erfassen",
-   "description": "Beim Wareneingang in der Filiale sollen Teillieferungen einer Palette erfasst werden können, offene Restmengen bleiben sichtbar.",
-   "status": "SELECTED FOR DEVELOPMENT",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-10-18T08:40:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-10-01T06:40:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1024",
-   "summary": "Abschriften nach Warenverlust automatisch buchen",
-   "description": "Warenverlust durch Bruch oder Verderb soll als Abschrift automatisch gebucht werden statt manuell über Retoure.",
-   "status": "ON HOLD",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-10-10T16:25:00",
-   "stream": "logistik",
-   "epic": "ADF-201",
-   "created": "2026-10-01T08:25:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1030",
-   "summary": "Gebindegröße bei Lieferantenwechsel übernehmen",
-   "description": "Wechselt der Lieferant eines Artikels, soll die neue Gebindegröße in die Artikelstammdaten übernommen werden.",
-   "status": "NEW REQUIREMENT",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-10-24T11:11:00",
-   "stream": "stammdaten",
-   "epic": "ADF-300",
-   "created": "2026-10-16T05:11:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1033",
-   "summary": "EAN-Dubletten im Artikelstamm erkennen",
-   "description": "Doppelte EAN-Nummern im Artikelstamm sollen beim Anlegen erkannt und gemeldet werden.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-09-30T10:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-300",
-   "created": "2026-09-25T10:00:00",
-   "resolved": "2026-09-30T10:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1040",
-   "summary": "Länderbericht Bestandsreichweite als Export",
-   "description": "Für jedes Land soll ein Bericht zur Bestandsreichweite je Warengruppe als Excel-Export bereitstehen.",
-   "status": "READY FOR DEPLOYMENT",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-10-25T07:55:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-10-17T04:55:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1042",
-   "summary": "Dashboard Kennzahlen Abschriften je Filiale",
-   "description": "Ein Dashboard soll die Abschriften-Kennzahlen je Filiale und Woche zeigen.",
-   "status": "DEVELOPMENT BACKLOG",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-10-21T15:30:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-10-04T07:30:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1047",
-   "summary": "Prognose Absatz bei Wetterumschwung",
-   "description": "Die Absatzprognose soll Wetterdaten berücksichtigen, damit Bestellvorschläge bei Hitze oder Kälte angepasst werden.",
-   "status": "REJECTED",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-09-12T12:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-09-08T04:00:00",
-   "resolved": "2026-09-12T12:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1050",
-   "summary": "Anlieferzeitfenster je Filiale pflegen",
-   "description": "Zeitfenster für die Anlieferung per LKW sollen je Filiale gepflegt und in der Tourenplanung berücksichtigt werden.",
-   "status": "VALIDATION TEAM",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-10-26T09:45:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-10-11T01:45:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1053",
-   "summary": "Wochenbericht Lieferpünktlichkeit je Lager",
-   "description": "Für die Länder fehlt ein Wochenbericht zur Lieferpünktlichkeit je Lager mit Vergleich zur Vorwoche.",
-   "status": "NEW REQUIREMENT",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-10-28T10:20:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-09-29T07:20:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1054",
-   "summary": "Lieferantenkontakt im Filialstamm hinterlegen",
-   "description": "Ansprechpartner des Lieferanten sollen im Filialstamm sichtbar sein, damit Rückfragen schneller gehen.",
-   "status": "VALIDATION INT",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-10-27T14:05:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-09-26T10:05:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1055",
-   "summary": "Retourengrund bei Leergut auswählbar machen",
-   "description": "Beim Erfassen von Leergut-Retouren fehlt eine Auswahl des Retourengrunds.",
-   "status": "NEW REQUIREMENT",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-10-29T08:12:00",
-   "stream": "logistik",
-   "epic": "ADF-201",
-   "created": "2026-10-26T06:12:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1056",
-   "summary": "Sicherheitsbestand saisonal anpassen",
-   "description": "Der Sicherheitsbestand soll sich bei Saisonartikeln automatisch an den Absatzverlauf anpassen.",
-   "status": "VALIDATION TEAM",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-10-23T09:30:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-09-23T04:30:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1057",
-   "summary": "CSV-Export der Abschriftenliste",
-   "description": "Die Abschriftenliste soll als CSV exportiert werden können, um sie im Land weiterzuverarbeiten.",
-   "status": "DEVELOPMENT BACKLOG",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-10-19T11:45:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-09-29T09:45:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1058",
-   "summary": "Bestellschluss je Lieferant im Bestellvorschlag anzeigen",
-   "description": "Im Bestellvorschlag ist nicht erkennbar, bis wann beim Lieferanten bestellt werden muss.",
-   "status": "SELECTED FOR DEVELOPMENT",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-10-17T13:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-10-01T08:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1059",
-   "summary": "Palettenetikett beim Wareneingang scannen",
-   "description": "Palettenetiketten sollen beim Wareneingang gescannt werden können statt manueller Eingabe.",
-   "status": "READY FOR DEPLOYMENT",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-10-26T16:40:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-10-17T15:40:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1060",
-   "summary": "Sortimentszuordnung für Regionalartikel",
-   "description": "Regionalartikel sollen nur den Filialen der Region zugeordnet werden.",
-   "status": "DONE",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-10-08T09:10:00",
-   "stream": "stammdaten",
-   "epic": "ADF-300",
-   "created": "2026-09-11T08:10:00",
-   "resolved": "2026-10-08T09:10:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1061",
-   "summary": "Kennzahl Bestandsreichweite in Tagen",
-   "description": "Die Bestandsreichweite soll im Länderbericht in Tagen statt Wochen angezeigt werden.",
-   "status": "DONE",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-10-02T15:20:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-09-07T10:20:00",
-   "resolved": "2026-10-02T15:20:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1062",
-   "summary": "Mindestbestand bei Filialumbau aussetzen",
-   "description": "Während eines Filialumbaus soll der Mindestbestand ausgesetzt werden können.",
-   "status": "ON HOLD DM",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-10-15T10:00:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-09-26T10:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1063",
-   "summary": "Avis des Lieferanten im Wareneingang anzeigen",
-   "description": "Das Lieferavis soll beim Wareneingang angezeigt werden, um Abweichungen sofort zu sehen.",
-   "status": "VALIDATION INT",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-10-29T12:30:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-09-27T04:30:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-1064",
-   "summary": "Öffnungszeiten im Filialstamm je Feiertag",
-   "description": "Abweichende Öffnungszeiten an Feiertagen sollen im Filialstamm gepflegt werden.",
-   "status": "NEW REQUIREMENT",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-10-30T07:50:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-10-20T01:50:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-901",
-   "summary": "Bestellvorschlag für Frischeartikel täglich neu rechnen",
-   "description": "Bestellvorschlag für Frischeartikel täglich neu rechnen. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-04-13T15:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-02-14T15:00:00",
-   "resolved": "2026-04-13T15:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-902",
-   "summary": "Mindestbestand je Regal hinterlegen",
-   "description": "Mindestbestand je Regal hinterlegen. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-03-30T07:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-02-09T07:00:00",
-   "resolved": "2026-03-30T07:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-903",
-   "summary": "Absatzprognose um Schulferien ergänzen",
-   "description": "Absatzprognose um Schulferien ergänzen. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-04-24T13:00:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-02-25T13:00:00",
-   "resolved": "2026-04-24T13:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-904",
-   "summary": "Nachschub bei Aktionsende reduzieren",
-   "description": "Nachschub bei Aktionsende reduzieren. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-07-26T10:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-07-05T10:00:00",
-   "resolved": "2026-07-26T10:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-905",
-   "summary": "Bestellvorschlag zeigt Bestellhistorie an",
-   "description": "Bestellvorschlag zeigt Bestellhistorie an. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-06-25T09:00:00",
-   "stream": "disposition",
-   "epic": "ADF-100",
-   "created": "2026-05-10T09:00:00",
-   "resolved": "2026-06-25T09:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-906",
-   "summary": "Sicherheitsbestand für Saisonware",
-   "description": "Sicherheitsbestand für Saisonware. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-07-06T07:00:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-06-20T07:00:00",
-   "resolved": "2026-07-06T07:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-907",
-   "summary": "Prognosegüte je Warengruppe anzeigen",
-   "description": "Prognosegüte je Warengruppe anzeigen. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-07-13T08:00:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-05-22T08:00:00",
-   "resolved": "2026-07-13T08:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-908",
-   "summary": "Disposition von Getränken nach Wetter",
-   "description": "Disposition von Getränken nach Wetter. Anforderung aus dem Stream disposition, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-08-24T14:00:00",
-   "stream": "disposition",
-   "epic": "ADF-101",
-   "created": "2026-07-26T14:00:00",
-   "resolved": "2026-08-24T14:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-909",
-   "summary": "Tourenplan im Wareneingang anzeigen",
-   "description": "Tourenplan im Wareneingang anzeigen. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-09-21T16:00:00",
-   "stream": "logistik",
-   "epic": "ADF-201",
-   "created": "2026-08-12T16:00:00",
-   "resolved": "2026-09-21T16:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-910",
-   "summary": "Retourenschein digital erfassen",
-   "description": "Retourenschein digital erfassen. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "SELECTED FOR DEVELOPMENT",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-03-24T07:00:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-02-20T07:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-911",
-   "summary": "Palettentausch im Lager buchen",
-   "description": "Palettentausch im Lager buchen. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-09-30T13:00:00",
-   "stream": "logistik",
-   "epic": "ADF-201",
-   "created": "2026-07-21T13:00:00",
-   "resolved": "2026-09-30T13:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-912",
-   "summary": "Abschriften mit Foto dokumentieren",
-   "description": "Abschriften mit Foto dokumentieren. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-02-25T08:00:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-01-10T08:00:00",
-   "resolved": "2026-02-25T08:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-913",
-   "summary": "Anlieferung außerhalb Zeitfenster melden",
-   "description": "Anlieferung außerhalb Zeitfenster melden. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-06-16T13:00:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-06-04T13:00:00",
-   "resolved": "2026-06-16T13:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-914",
-   "summary": "LKW-Ankunft per Scan bestätigen",
-   "description": "LKW-Ankunft per Scan bestätigen. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "READY FOR DEPLOYMENT",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-10-05T08:00:00",
-   "stream": "logistik",
-   "epic": "ADF-200",
-   "created": "2026-09-21T08:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-915",
-   "summary": "Leergutrücknahme je Lager auswerten",
-   "description": "Leergutrücknahme je Lager auswerten. Anforderung aus dem Stream logistik, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-01-19T16:00:00",
-   "stream": "logistik",
-   "epic": "ADF-201",
-   "created": "2026-01-05T16:00:00",
-   "resolved": "2026-01-19T16:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-916",
-   "summary": "Gebindeänderung an Filialen melden",
-   "description": "Gebindeänderung an Filialen melden. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-07-03T10:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-06-11T10:00:00",
-   "resolved": "2026-07-03T10:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-917",
-   "summary": "Lieferantenwechsel im Artikelstamm historisieren",
-   "description": "Lieferantenwechsel im Artikelstamm historisieren. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "ON HOLD",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-02-24T15:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-02-09T15:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-918",
-   "summary": "EAN-Prüfziffer beim Anlegen prüfen",
-   "description": "EAN-Prüfziffer beim Anlegen prüfen. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "VALIDATION TEAM",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-06-09T15:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-04-23T15:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-919",
-   "summary": "Einheiten für Loseware vereinheitlichen",
-   "description": "Einheiten für Loseware vereinheitlichen. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "DEVELOPMENT BACKLOG",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-10-30T12:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-300",
-   "created": "2026-09-26T14:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-920",
-   "summary": "Sortimentsliste je Region exportieren",
-   "description": "Sortimentsliste je Region exportieren. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-05-16T07:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-300",
-   "created": "2026-04-27T07:00:00",
-   "resolved": "2026-05-16T07:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-921",
-   "summary": "Artikelbild im Stamm hinterlegen",
-   "description": "Artikelbild im Stamm hinterlegen. Anforderung aus dem Stream stammdaten, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-03-04T12:00:00",
-   "stream": "stammdaten",
-   "epic": "ADF-301",
-   "created": "2026-01-21T12:00:00",
-   "resolved": "2026-03-04T12:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-922",
-   "summary": "Bericht Abschriftenquote je Land",
-   "description": "Bericht Abschriftenquote je Land. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-07-05T15:00:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-04-24T15:00:00",
-   "resolved": "2026-07-05T15:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-923",
-   "summary": "KPI Lieferpünktlichkeit monatlich",
-   "description": "KPI Lieferpünktlichkeit monatlich. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-10-07T10:00:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-08-01T10:00:00",
-   "resolved": "2026-10-07T10:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-924",
-   "summary": "Dashboard Bestandsreichweite je Lager",
-   "description": "Dashboard Bestandsreichweite je Lager. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "REJECTED",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-08-21T14:00:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-08-03T14:00:00",
-   "resolved": "2026-08-21T14:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-925",
-   "summary": "Export Bestellvorschläge als CSV",
-   "description": "Export Bestellvorschläge als CSV. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-07-20T10:00:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-05-12T10:00:00",
-   "resolved": "2026-07-20T10:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-926",
-   "summary": "Auswertung Retourengründe",
-   "description": "Auswertung Retourengründe. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-04-29T11:00:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-04-08T11:00:00",
-   "resolved": "2026-04-29T11:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-927",
-   "summary": "Länderbericht Out-of-Stock",
-   "description": "Länderbericht Out-of-Stock. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "SELECTED FOR DEVELOPMENT",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-03-07T15:00:00",
-   "stream": "reporting",
-   "epic": "ADF-400",
-   "created": "2026-01-30T15:00:00",
-   "resolved": null,
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADF-928",
-   "summary": "Kennzahl Prognosegüte im Dashboard",
-   "description": "Kennzahl Prognosegüte im Dashboard. Anforderung aus dem Stream reporting, abgestimmt mit den Ländern.",
-   "status": "DONE",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-08-10T07:00:00",
-   "stream": "reporting",
-   "epic": "ADF-401",
-   "created": "2026-07-29T07:00:00",
-   "resolved": "2026-08-10T07:00:00",
-   "issue_type": "Story"
-  },
-  {
-   "key": "ADFCR-41",
-   "summary": "Länderreport AT: Bestandsreichweite fehlt für Lager 2",
-   "description": "Länderreport AT: Bestandsreichweite fehlt für Lager 2. Anfrage aus dem Land für den Country Report.",
-   "status": "NEW REQUIREMENT",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-03-26T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-03-06T00:00:00",
-   "resolved": null,
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  },
-  {
-   "key": "ADFCR-42",
-   "summary": "Country Report PL: Abschriften je Woche",
-   "description": "Country Report PL: Abschriften je Woche. Anfrage aus dem Land für den Country Report.",
-   "status": "VALIDATION INT",
-   "reporter": "julia.nowak@example.com",
-   "updated": "2026-04-28T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-04-08T00:00:00",
-   "resolved": null,
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  },
-  {
-   "key": "ADFCR-43",
-   "summary": "Länderreport NL: Lieferpünktlichkeit monatlich",
-   "description": "Länderreport NL: Lieferpünktlichkeit monatlich. Anfrage aus dem Land für den Country Report.",
-   "status": "DONE",
-   "reporter": "lukas.schmidt@example.com",
-   "updated": "2026-05-31T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-05-11T00:00:00",
-   "resolved": "2026-05-31T00:00:00",
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  },
-  {
-   "key": "ADFCR-44",
-   "summary": "Country Report CZ: Out-of-Stock je Filiale",
-   "description": "Country Report CZ: Out-of-Stock je Filiale. Anfrage aus dem Land für den Country Report.",
-   "status": "DEVELOPMENT BACKLOG",
-   "reporter": "sofia.martin@example.com",
-   "updated": "2026-07-03T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-06-13T00:00:00",
-   "resolved": null,
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  },
-  {
-   "key": "ADFCR-45",
-   "summary": "Länderreport BE: Retourenquote",
-   "description": "Länderreport BE: Retourenquote. Anfrage aus dem Land für den Country Report.",
-   "status": "ON HOLD DM",
-   "reporter": "anna.berger@example.com",
-   "updated": "2026-08-05T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-07-16T00:00:00",
-   "resolved": null,
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  },
-  {
-   "key": "ADFCR-46",
-   "summary": "Country Report ES: Prognosegüte Frische",
-   "description": "Country Report ES: Prognosegüte Frische. Anfrage aus dem Land für den Country Report.",
-   "status": "DONE",
-   "reporter": "marco.rossi@example.com",
-   "updated": "2026-09-07T00:00:00",
-   "stream": null,
-   "epic": null,
-   "created": "2026-08-18T00:00:00",
-   "resolved": "2026-09-07T00:00:00",
-   "issue_type": "Story",
-   "board_scope": "adfcr"
-  }
- ],
- "pages": [
-  {
-   "id": "CF-501",
-   "title": "Leitfaden Anforderungs-Tickets",
-   "space": "ADF",
-   "body": "Anforderungen werden als User Stories verfasst und einem zentralen Epic zugeordnet. Format: Als Rolle möchte ich Ziel, damit Nutzen. Akzeptanzkriterien sind Pflicht. Prioritäten: Blocker, High, Medium, Low. Länder legen keine Epics an. Betrifft eine Anforderung mehrere Streams, wird sie je Stream aufgeteilt."
-  },
-  {
-   "id": "CF-502",
-   "title": "Funktionsbeschreibung Bestellvorschlag",
-   "space": "ADF",
-   "body": "Der Bestellvorschlag berechnet aus Prognose, aktuellem Bestand und Mindestbestand die Bestellmenge je Artikel und Filiale. Feiertage werden über den zentralen Kalender berücksichtigt, regionale Feiertage sind noch nicht abgebildet."
-  },
-  {
-   "id": "CF-503",
-   "title": "Ticket-Lebenszyklus und Status",
-   "space": "ADF",
-   "body": "NEW REQUIREMENT, VALIDATION INT, ON HOLD DM, VALIDATION TEAM, ON HOLD, DEVELOPMENT BACKLOG, SELECTED FOR DEVELOPMENT, READY FOR DEPLOYMENT, DONE. Duplikate werden auf REJECTED gesetzt und das bestehende Ticket referenziert. Spätestens bei SELECTED FOR DEVELOPMENT muss das NEO-Board verknüpft sein."
-  },
-  {
-   "id": "CF-504",
-   "title": "Release-Notes Patch 2026.10.2",
-   "space": "REL",
-   "body": "Patch 2026.10.2: Umstellung der Rundungslogik im Bestellvorschlag auf Gebindegrößen, neue Validierung im Wareneingang für Teillieferungen, Performance-Optimierung im Reporting."
-  },
-  {
-   "id": "CF-505",
-   "title": "Wareneingang in der Filiale",
-   "space": "ADF",
-   "body": "Beim Wareneingang wird die Lieferung gegen den Lieferschein geprüft. Abweichungen werden als Differenz erfasst. Teillieferungen sind ab Patch 2026.10.2 möglich."
-  }
- ],
- "bugs": [
-  {
-   "number": "INC0041871",
-   "short_description": "Bestellvorschlag rundet Mengen falsch auf Gebinde",
-   "description": "Seit Anfang der Woche schlägt der Bestellvorschlag Mengen vor, die nicht zur Gebindegröße passen. Statt 12 werden 13 Stück bestellt.",
-   "component": "bestellvorschlag",
-   "first_seen": "2026-10-14T07:30:00",
-   "priority": "2 - High",
-   "caller": "Petra Klein, petra.klein@example.com"
-  },
-  {
-   "number": "INC0041902",
-   "short_description": "Wareneingang bricht bei Teillieferung ab",
-   "description": "Beim Buchen einer Teillieferung im Wareneingang erscheint ein Fehler und die Buchung bricht ab.",
-   "component": "wareneingang",
-   "first_seen": "2026-10-15T10:05:00",
-   "priority": "1 - Critical",
-   "caller": "Tom Weber, +49 170 1234567"
-  },
-  {
-   "number": "INC0041950",
-   "short_description": "Länderbericht lädt sehr langsam",
-   "description": "Der Länderbericht Bestandsreichweite braucht mehrere Minuten zum Laden.",
-   "component": "reporting",
-   "first_seen": "2026-10-16T09:00:00",
-   "priority": "3 - Moderate",
-   "caller": "Sara Vogel"
-  },
-  {
-   "number": "INC0042010",
-   "short_description": "Anmeldung am Handscanner schlägt sporadisch fehl",
-   "description": "Mitarbeiter können sich gelegentlich nicht am Handscanner anmelden.",
-   "component": "handscanner",
-   "first_seen": "2026-10-20T06:15:00",
-   "priority": "3 - Moderate",
-   "caller": "Nina Roth"
-  }
- ],
- "changes": [
-  {
-   "id": "CHG0030110",
-   "title": "Rundungslogik Bestellvorschlag auf Gebindegrößen umgestellt",
-   "description": "Bestellmengen im Bestellvorschlag werden jetzt auf die Gebindegröße des Lieferanten gerundet statt auf Stück.",
-   "author": "Felix Hartmann",
-   "deployed_at": "2026-10-13T22:00:00",
-   "components": [
-    "bestellvorschlag",
-    "stammdaten"
-   ],
-   "release": "2026.10.2"
-  },
-  {
-   "id": "CHG0030111",
-   "title": "Validierung Teillieferungen im Wareneingang",
-   "description": "Neue Validierung für Teillieferungen beim Wareneingang in der Filiale.",
-   "author": "Lea Brandt",
-   "deployed_at": "2026-10-13T22:00:00",
-   "components": [
-    "wareneingang"
-   ],
-   "release": "2026.10.2"
-  },
-  {
-   "id": "CHG0030112",
-   "title": "Performance-Optimierung Reporting-Abfragen",
-   "description": "Indizes und Caching für Reporting-Abfragen der Länderberichte angepasst.",
-   "author": "Jonas Keller",
-   "deployed_at": "2026-10-13T22:00:00",
-   "components": [
-    "reporting"
-   ],
-   "release": "2026.10.2"
-  },
-  {
-   "id": "CHG0030090",
-   "title": "Feiertagskalender Update",
-   "description": "Zentraler Feiertagskalender für 2027 eingespielt.",
-   "author": "Mia Schulz",
-   "deployed_at": "2026-10-06T22:00:00",
-   "components": [
-    "bestellvorschlag"
-   ],
-   "release": "2026.10.1"
-  },
-  {
-   "id": "CHG0030095",
-   "title": "Lieferantenstammdaten Schnittstelle erweitert",
-   "description": "Gebindegrößen werden aus der Lieferantenschnittstelle in den Artikelstamm übernommen.",
-   "author": "Felix Hartmann",
-   "deployed_at": "2026-10-06T22:00:00",
-   "components": [
-    "stammdaten"
-   ],
-   "release": "2026.10.1"
-  },
-  {
-   "id": "CHG0030130",
-   "title": "Logging im Wareneingang erweitert",
-   "description": "Zusätzliches Logging für Fehleranalyse im Wareneingang.",
-   "author": "Lea Brandt",
-   "deployed_at": "2026-10-16T22:00:00",
-   "components": [
-    "wareneingang"
-   ],
-   "release": "2026.10.3"
-  },
-  {
-   "id": "CHG0029900",
-   "title": "Tourenplanung Zeitfenster",
-   "description": "Anlieferzeitfenster in der Tourenplanung.",
-   "author": "Can Yilmaz",
-   "deployed_at": "2026-09-15T22:00:00",
-   "components": [
-    "logistik"
-   ],
-   "release": "2026.09.2"
-  }
- ],
- "documents": [
-  {
-   "id": "anleitung-bestellvorschlag",
-   "title": "Anleitung Bestellvorschlag prüfen und freigeben",
-   "kind": "guide",
-   "url": "https://wiki.example.com/adf/anleitung/bestellvorschlag",
-   "body": "So prüfst du den automatischen Bestellvorschlag in der Filiale:\n\n1. Öffne die Übersicht Bestellvorschlag und wähle den Liefertag.\n2. Prüfe Artikel mit Hinweis auf Mindestbestand oder Aktionsware. Mengen lassen sich je Zeile anpassen.\n3. Feiertage werden aktuell nicht automatisch berücksichtigt. Erhöhe die Menge vor regionalen Feiertagen\n   manuell (siehe Ticket ADF-1012).\n4. Gib den Vorschlag bis zum Bestellschluss frei. Danach ist die Bestellung beim Lieferanten."
-  },
-  {
-   "id": "changelog-2026-10",
-   "title": "Change Log Release 2026.10.2",
-   "kind": "changelog",
-   "url": "https://wiki.example.com/adf/changelog/2026-10-2",
-   "body": "Release 2026.10.2, ausgerollt am 13.10.2026.\n\n- Bestellvorschlag: Bestellmengen werden auf die Gebindegröße des Lieferanten gerundet statt auf Stück.\n- Wareneingang: neue Validierung für Teillieferungen in der Filiale.\n- Reporting: Indizes und Caching für die Abfragen der Länderberichte angepasst.\n- Stammdaten: EAN-Dubletten im Artikelstamm werden beim Anlegen erkannt und gemeldet."
-  },
-  {
-   "id": "schulung-wareneingang",
-   "title": "Schulung Wareneingang und Teillieferungen",
-   "kind": "training",
-   "url": "https://wiki.example.com/adf/schulung/wareneingang",
-   "body": "Schulungsunterlage für Filialteams, Modul Wareneingang.\n\nEine Teillieferung liegt vor, wenn weniger Paletten ankommen als im Lieferavis angekündigt. Erfasse zuerst die\ngelieferten Paletten, dann markiere die fehlenden Positionen als offen. Seit Release 2026.10.2 prüft das System\nTeillieferungen beim Abschluss. Bricht der Wareneingang ab, melde die Störung mit Lieferscheinnummer über\nServiceNow."
-  }
- ]
-};

@@ -5,7 +5,8 @@ Anleitungen, Releases, Bug-Ursachen, Admin) als **Google Apps Script Web-App**. 
 entsprechen 1:1 der Python-Fassung: gleiche Seiten, gleiche Texte, gleiche Berechnungen.
 
 - **KI:** Gemini über Vertex AI mit dem Google-Token der Web-App und der **Projekt-ID** (kein API-Key).
-- **Jira, Confluence, ServiceNow:** PATs sind Platzhalter. Solange sie fehlen, läuft alles mit Testdaten.
+- **Jira, Confluence, ServiceNow:** **nur lesend**, mit PAT als Bearer. Die App legt nichts an und ändert nichts
+  (Sperre im Code, siehe „Nur lesen“). Ausgeliefert wird ohne Testdaten; fehlt ein PAT, zeigt die Seite das im Block.
 - **Anmeldung:** über das Google-Konto. Niemand braucht ein Passwort für die App.
 
 ## Ordner
@@ -90,14 +91,13 @@ besten Textstellen der Quellen.
 | Eigenschaft | Bedeutung |
 |---|---|
 | `APP_NAME` | Name der App oben links |
-| `DATA_SOURCE` | `mock` = Testdaten (Standard), `live` = Jira/Confluence/ServiceNow über REST |
+| `DATA_SOURCE` | `live` (Standard): echte Daten. `mock` gibt es nur in der Entwicklung (`MockData.gs` wird nicht ausgeliefert) |
 | `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `GEMINI_MODEL`, `VERTEX_EMBEDDING_MODEL` | KI, siehe oben |
 | `EMBEDDINGS` | `auto` (Standard: Vertex, wenn eine Projekt-ID da ist), `vertex` oder `hashing` (offline) |
 | `JIRA_URL`, `JIRA_PAT` | Jira Server/Data Center, PAT als Bearer-Token |
 | `JIRA_JQL` | Abfrage für die Stream-Tickets, solange keine Board-IDs gesetzt sind |
 | `JIRA_BOARD_DISPOSITION`, `…_LOGISTIK`, `…_STAMMDATEN`, `…_REPORTING` | Board-IDs je Stream (alle vier oder keine) |
 | `JIRA_BOARD_ADFCR`, `JIRA_ADFCR_JQL` | Country-Report-Board bzw. Abfrage dafür |
-| `JIRA_WRITE_ENABLED` | `false` (Standard). Erst auf `true`, wenn Tickets wirklich angelegt werden sollen |
 | `CONFLUENCE_URL`, `CONFLUENCE_PAT`, `CONFLUENCE_SPACES` | Confluence und die Bereiche (kommagetrennt) |
 | `SERVICENOW_URL`, `SERVICENOW_TOKEN` | ServiceNow-Table-API für Incidents und Changes |
 | `DOCS_FOLDER_ID` | Optional: Drive-Ordner mit Markdown-Dateien für Anleitungen, Schulungen, Change Log |
@@ -108,11 +108,29 @@ Werte, die mit `PLATZHALTER` beginnen, gelten als nicht gesetzt. Streams, Epics,
 Länder stehen oben in `Code.gs` (Abschnitt `Config.gs`, Objekte `SETTINGS` und `STREAMS`). Neuer Stream = neuer
 Eintrag in `STREAMS`.
 
-## Auf echte Daten umschalten
+## Echte Daten
 
-1. PATs und URLs in die Skripteigenschaften eintragen.
-2. `DATA_SOURCE` auf `live` setzen. Keine neue Bereitstellung nötig, Eigenschaften gelten sofort.
-3. Ist ein System nicht erreichbar, zeigt die jeweilige Seite den Grund im Block an. Die übrigen Seiten laufen weiter.
+1. PATs und URLs in die Skripteigenschaften eintragen. Keine neue Bereitstellung nötig, Eigenschaften gelten sofort.
+2. Ist ein System nicht erreichbar oder fehlt ein PAT, zeigt die jeweilige Seite den Grund im Block an. Die übrigen
+   Seiten laufen weiter.
+
+## Nur lesen
+
+Diese Fassung schreibt nirgends hin. Abgesichert in mehreren Schichten:
+
+1. **Sperre im Code** (`assertReadOnly_` in `Adapters.gs`): Jeder HTTP-Aufruf der App läuft hindurch. An Jira,
+   Confluence, ServiceNow und jede andere Adresse geht nur `GET`. Einzige Ausnahme ist Vertex AI
+   (`*aiplatform.googleapis.com`), das Anfragen per `POST` erwartet. Keine Skripteigenschaft kann das lockern.
+2. **Kein Code zum Anlegen:** Der frühere Jira-Writer ist entfernt; „Einreichen“ bleibt gesperrt, das Ticket wird
+   als Text kopiert und von Hand in Jira eingefügt.
+3. **Berechtigungen:** Drive nur lesend (`drive.readonly`), keine Gmail-, Kalender- oder Tabellen-Rechte.
+4. **Prüfungen:** Ein Test ruft alle Seiten und Formulare (auch „Einreichen“) gegen nachgebildete Systeme auf und
+   zählt jede Methode: nur `GET` an Jira & Co. Der Guard-Check `as-readonly` scheitert, sobald Code mit
+   `POST`/`PUT`/`DELETE` an andere Adressen, ein neuer `UrlFetchApp`-Aufruf an der Sperre vorbei oder eine
+   zusätzliche Berechtigung auftaucht.
+
+Zusätzlich empfehlenswert: die PATs von einem Konto mit nur Leserechten anlegen. Jira- und Confluence-PATs haben
+immer die Rechte des Kontos, für das sie erstellt wurden.
 
 **Wichtig, bitte vorab mit der IT klären:** Apps Script ruft Jira, Confluence und ServiceNow von **Google-Servern**
 aus auf, nicht aus dem Firmennetz. Systeme, die nur im Firmennetz erreichbar sind, antworten dann nicht. Mögliche
@@ -131,7 +149,7 @@ Jira-Daten werden 5 Minuten zwischengespeichert, Vektoren für die Ähnlichkeits
 | Sprache, Testperson | Cookies | je Nutzer gespeichert (`UserProperties`) |
 | Dokumente | Ordner mit Markdown | Drive-Ordner mit Markdown (`DOCS_FOLDER_ID`) |
 | Seitenwechsel | Seite lädt neu | ohne Neuladen, Adresse als `#/pfad` |
-| Testdaten | Fixtures | `MockData.gs` |
+| Testdaten | Fixtures | `MockData.gs`, nur in der Entwicklung, nicht ausgeliefert |
 
 ## Fehlerbilder
 

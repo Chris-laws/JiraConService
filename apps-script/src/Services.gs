@@ -527,8 +527,8 @@ function toJiraMarkup(draft, streamName, epicKey) {
 }
 
 /**
- * Felder für POST /rest/api/2/issue. Autor (reporter) ist die angemeldete Person, nicht das technische Konto
- * hinter dem PAT. Geschrieben wird nur, wenn JIRA_WRITE_ENABLED gesetzt ist.
+ * Ticketfelder im Format der Jira-REST-API (prüft Stream und Pflichtangaben). Autor (reporter) wäre die angemeldete
+ * Person. Diese Fassung schickt sie nie an Jira (siehe assertReadOnly_ in Adapters.gs).
  */
 function issueFields(draft, o) {
   if (o.multiStream) throw new OneStreamOnly('Das Ticket betrifft mehrere Streams. Bitte aufteilen, je Stream ein Ticket.');

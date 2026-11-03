@@ -351,7 +351,7 @@ function adminPage_(req) {
       ['Datenquelle', !mock, !mock ? 'Live-Modus' : 'Lokaler Modus'],
       ['Jira lesen', error === null, error || 'Erreichbar'],
       ['KI', c.llm.available, c.llm.available ? 'Aktiv' : 'Offline, Antworten direkt aus den Quellen'],
-      ['Jira schreiben', c.jiraWriter.enabled, c.jiraWriter.enabled ? 'Freigegeben' : 'Abgeschaltet']
+      ['Jira schreiben', false, 'Gesperrt, nur Lesen']
     ]
   }, { issues: issues });
 }

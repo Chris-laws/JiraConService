@@ -102,6 +102,44 @@ def brand() -> Result:
     return Result(not hits, hits[:20])
 
 
+SCOPES_ALLOWED = {
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/drive.readonly",
+}
+
+
+def readonly() -> Result:
+    """Nur lesen: jeder HTTP-Aufruf läuft durch die Sperre, nur GET (außer Vertex), keine Schreib-Berechtigungen."""
+    hits = []
+    src = APPS / "src"
+    for path in sorted(src.glob("*.gs")):
+        if path.name == "MockData.gs":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "UrlFetchApp." in text and path.name not in ("Adapters.gs", "Vertex.gs"):
+            hits.append(f"{path.name}: UrlFetchApp außerhalb von Adapters.gs/Vertex.gs")
+        for m in re.finditer(r"requestJson\(\s*'(\w+)'", text):
+            if m.group(1) != "GET" and path.name != "Vertex.gs":
+                hits.append(f"{path.name}: requestJson('{m.group(1)}') an Jira/Confluence/ServiceNow")
+        if re.search(r"method:\s*'(put|patch|delete)'", text, re.I):
+            hits.append(f"{path.name}: PUT/PATCH/DELETE im Code")
+    adapters = (src / "Adapters.gs").read_text(encoding="utf-8")
+    body = adapters[adapters.index("function requestJson(") :]
+    if "assertReadOnly_(method, url);" not in body[: body.index("UrlFetchApp.fetch")]:
+        hits.append("Adapters.gs: requestJson ruft assertReadOnly_ nicht vor dem Abruf auf")
+    vertex = (src / "Vertex.gs").read_text(encoding="utf-8")
+    if "assertReadOnly_('POST', url);" not in vertex:
+        hits.append("Vertex.gs: paralleles Einbetten ohne assertReadOnly_")
+    if "JiraRestWriter" in adapters or "/rest/api/2/issue'" in adapters:
+        hits.append("Adapters.gs: Code zum Anlegen in Jira ist zurück")
+    manifest = json.loads((src / "appsscript.json").read_text(encoding="utf-8"))
+    extra = set(manifest.get("oauthScopes", [])) - SCOPES_ALLOWED
+    hits += [f"appsscript.json: zusätzliche Berechtigung {x}" for x in sorted(extra)]
+    return Result(not hits, hits)
+
+
 def privacy() -> Result:
     """Gemini-Prompts laufen durch redact(); der Melder (caller) verlässt den Server nicht."""
     hits = []

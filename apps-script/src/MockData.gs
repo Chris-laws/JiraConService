@@ -1,5 +1,8 @@
 /**
- * Testdaten für den Modus DATA_SOURCE=mock (Standard). Erfundene Tickets, Seiten, Bugs und Changes, damit die
+ * Nur für Entwicklung und Tests: wird NICHT ausgeliefert (bundle.js lässt diese Datei weg). Ohne sie gibt es nur
+ * echte Daten; DATA_SOURCE=mock meldet dann einen Konfigurationsfehler.
+ *
+ * Testdaten für den Modus DATA_SOURCE=mock. Erfundene Tickets, Seiten, Bugs und Changes, damit die
  * Oberfläche ohne Firmennetz und ohne PATs vollständig läuft. Zeiten sind Wanduhr-Zeiten (ISO ohne Zeitzone).
  */
 var MOCK_DATA = {
@@ -912,4 +915,63 @@ var MOCK_DATA = {
    "body": "Schulungsunterlage für Filialteams, Modul Wareneingang.\n\nEine Teillieferung liegt vor, wenn weniger Paletten ankommen als im Lieferavis angekündigt. Erfasse zuerst die\ngelieferten Paletten, dann markiere die fehlenden Positionen als offen. Seit Release 2026.10.2 prüft das System\nTeillieferungen beim Abschluss. Bricht der Wareneingang ab, melde die Störung mit Lieferscheinnummer über\nServiceNow."
   }
  ]
+};
+
+// ---------- Mock-Adapter auf Basis von MOCK_DATA ----------
+
+var MOCK_JIRA_URL = 'https://jira.example.com';
+var MOCK_CONFLUENCE_URL = 'https://confluence.example.com';
+var MOCK_SERVICENOW_URL = 'https://servicenow.example.com';
+
+function MockJira() {
+  this.issues = MOCK_DATA.issues.map(function (r) {
+    return {
+      key: r.key, summary: r.summary, description: r.description, status: r.status, reporter: r.reporter,
+      updated: parseTime(r.updated), url: MOCK_JIRA_URL + '/browse/' + r.key, stream: r.stream || null,
+      epic: r.epic || null, issue_type: r.issue_type || 'Story', created: parseTime(r.created),
+      resolved: parseTime(r.resolved), board_scope: r.board_scope || r.stream || null
+    };
+  });
+}
+MockJira.prototype.searchIssues = function () { return this.issues.filter(function (i) { return i.board_scope !== 'adfcr'; }); };
+MockJira.prototype.dashboardIssues = function () { return this.issues.slice(); };
+MockJira.prototype.issuesByReporter = function (email) {
+  email = String(email).trim().toLowerCase();
+  return this.issues.filter(function (i) { return i.reporter.toLowerCase() === email; });
+};
+
+function MockConfluence() {}
+MockConfluence.prototype.pages = function () {
+  return MOCK_DATA.pages.map(function (r) {
+    return { id: r.id, title: r.title, body: r.body, space: r.space, url: MOCK_CONFLUENCE_URL + '/pages/' + r.id };
+  });
+};
+
+function MockServiceNow() {}
+MockServiceNow.prototype.bugs = function () {
+  return MOCK_DATA.bugs.map(function (r) {
+    return {
+      number: r.number, short_description: r.short_description, description: r.description, component: r.component,
+      first_seen: parseTime(r.first_seen), url: MOCK_SERVICENOW_URL + '/incident/' + r.number,
+      priority: r.priority || '', caller: r.caller || ''
+    };
+  });
+};
+MockServiceNow.prototype.bug = function (number) {
+  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
+  if (!hit) throw new Error('Bug nicht gefunden: ' + number);
+  return hit;
+};
+MockServiceNow.prototype.changes = function () {
+  return MOCK_DATA.changes.map(function (r) {
+    return {
+      id: r.id, title: r.title, description: r.description, author: r.author, deployed_at: parseTime(r.deployed_at),
+      components: r.components.slice(), url: MOCK_SERVICENOW_URL + '/change/' + r.id, release: r.release || ''
+    };
+  });
+};
+
+function MockDocuments() {}
+MockDocuments.prototype.documents = function () {
+  return MOCK_DATA.documents.map(function (d) { return { id: d.id, title: d.title, body: d.body, kind: d.kind, url: d.url }; });
 };

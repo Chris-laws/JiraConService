@@ -21,9 +21,24 @@
 
 // ---------- HTTP ----------
 
+/**
+ * Nur-Lesen-Sperre, fest im Code (keine Skripteigenschaft kann sie lockern): Jira, Confluence, ServiceNow und jede
+ * andere Adresse bekommen ausschließlich GET. Einzige Ausnahme ist Vertex AI (Gemini und Embeddings), das Anfragen
+ * technisch per POST erwartet; dorthin gehen nur Texte zum Auswerten, nie etwas an Jira & Co.
+ * Jeder HTTP-Aufruf der App läuft hier durch (requestJson und das parallele Einbetten in Vertex.gs).
+ */
+var READ_ONLY_POST_HOST_ = /^https:\/\/([a-z0-9-]+-)?aiplatform\.googleapis\.com\//;
+function assertReadOnly_(method, url) {
+  var m = String(method || '').toUpperCase();
+  if (m === 'GET') return;
+  if (m === 'POST' && READ_ONLY_POST_HOST_.test(String(url))) return;
+  throw new WriteDisabled('Nur-Lesen-Sperre: ' + m + ' an ' + String(url).split('?')[0].replace(/^(https?:\/\/[^/]+).*$/, '$1') + ' ist verboten.');
+}
+
 /** Gemeinsamer HTTP-Aufruf. Fehler werden zu errorType (Standard: SourceUnavailable). */
 function requestJson(method, url, options) {
   options = options || {};
+  assertReadOnly_(method, url);
   var ErrorType = options.error || SourceUnavailable;
   var host = url.split('?')[0]; // nie Query-Parameter melden (könnten Tokens enthalten)
   if (options.params) {
@@ -186,13 +201,13 @@ JiraRestReader.prototype.issuesByReporter = function (email) {
   return this.search_('reporter = "' + safe + '" ORDER BY updated DESC');
 };
 
-function JiraRestWriter(s) { this.s = s; this.enabled = !!s.jiraWriteEnabled; }
-JiraRestWriter.prototype.createIssue = function (fields) {
-  if (!this.enabled) throw new WriteDisabled('Schreiben nach Jira ist im Prototyp abgeschaltet');
-  var data = requestJson('POST', requireUrl_(this.s.jiraUrl, 'JIRA_URL') + '/rest/api/2/issue', {
-    headers: bearer_(this.s.jiraPat), json: { fields: fields }
-  });
-  return String(data.key);
+/**
+ * Diese Fassung liest nur. Es gibt keinen Code, der in Jira etwas anlegt oder ändert; der „Writer“ sagt immer nein.
+ * Wer später schreiben will, muss hier bewusst neuen Code einbauen UND die Sperre in assertReadOnly_ lockern.
+ */
+function ReadOnlyJiraWriter() { this.enabled = false; }
+ReadOnlyJiraWriter.prototype.createIssue = function () {
+  throw new WriteDisabled('Diese Fassung liest nur. Anlegen in Jira ist gesperrt.');
 };
 
 // ---------- Confluence (Server/Data Center, PAT als Bearer) ----------
@@ -334,71 +349,9 @@ DriveDocuments.prototype.documents = function () {
   return sortBy(docs, function (d) { return d.id; });
 };
 
-// ---------- Mock-Adapter auf Basis von MockData.gs. Damit läuft alles ohne Firmennetz ----------
-
-var MOCK_JIRA_URL = 'https://jira.example.com';
-var MOCK_CONFLUENCE_URL = 'https://confluence.example.com';
-var MOCK_SERVICENOW_URL = 'https://servicenow.example.com';
-
-function MockJira() {
-  this.issues = MOCK_DATA.issues.map(function (r) {
-    return {
-      key: r.key, summary: r.summary, description: r.description, status: r.status, reporter: r.reporter,
-      updated: parseTime(r.updated), url: MOCK_JIRA_URL + '/browse/' + r.key, stream: r.stream || null,
-      epic: r.epic || null, issue_type: r.issue_type || 'Story', created: parseTime(r.created),
-      resolved: parseTime(r.resolved), board_scope: r.board_scope || r.stream || null
-    };
-  });
-}
-MockJira.prototype.searchIssues = function () { return this.issues.filter(function (i) { return i.board_scope !== 'adfcr'; }); };
-MockJira.prototype.dashboardIssues = function () { return this.issues.slice(); };
-MockJira.prototype.issuesByReporter = function (email) {
-  email = String(email).trim().toLowerCase();
-  return this.issues.filter(function (i) { return i.reporter.toLowerCase() === email; });
-};
-
-function MockJiraWriter(enabled) { this.enabled = !!enabled; this.created = 0; }
-MockJiraWriter.prototype.createIssue = function () {
-  if (!this.enabled) throw new WriteDisabled('Schreiben nach Jira ist im Prototyp abgeschaltet');
-  this.created += 1;
-  return 'MOCK-' + this.created;
-};
-
-function MockConfluence() {}
-MockConfluence.prototype.pages = function () {
-  return MOCK_DATA.pages.map(function (r) {
-    return { id: r.id, title: r.title, body: r.body, space: r.space, url: MOCK_CONFLUENCE_URL + '/pages/' + r.id };
-  });
-};
-
-function MockServiceNow() {}
-MockServiceNow.prototype.bugs = function () {
-  return MOCK_DATA.bugs.map(function (r) {
-    return {
-      number: r.number, short_description: r.short_description, description: r.description, component: r.component,
-      first_seen: parseTime(r.first_seen), url: MOCK_SERVICENOW_URL + '/incident/' + r.number,
-      priority: r.priority || '', caller: r.caller || ''
-    };
-  });
-};
-MockServiceNow.prototype.bug = function (number) {
-  var hit = this.bugs().filter(function (b) { return b.number === number; })[0];
-  if (!hit) throw new Error('Bug nicht gefunden: ' + number);
-  return hit;
-};
-MockServiceNow.prototype.changes = function () {
-  return MOCK_DATA.changes.map(function (r) {
-    return {
-      id: r.id, title: r.title, description: r.description, author: r.author, deployed_at: parseTime(r.deployed_at),
-      components: r.components.slice(), url: MOCK_SERVICENOW_URL + '/change/' + r.id, release: r.release || ''
-    };
-  });
-};
-
-function MockDocuments() {}
-MockDocuments.prototype.documents = function () {
-  return MOCK_DATA.documents.map(function (d) { return { id: d.id, title: d.title, body: d.body, kind: d.kind, url: d.url }; });
-};
+/** Ohne DOCS_FOLDER_ID: keine Anleitungen (die Seite sagt, wie man den Drive-Ordner einträgt). */
+function EmptyDocuments() {}
+EmptyDocuments.prototype.documents = function () { return []; };
 
 // ---------- Zwischenspeicher für Live-Abfragen ----------
 // Jede Seite lädt die Jira-Daten neu; für ein paar Minuten reicht der Stand aus dem Cache.

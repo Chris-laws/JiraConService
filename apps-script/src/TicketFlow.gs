@@ -181,7 +181,7 @@ function blocked_(c, form, edited, streamName, multi, reporter, gate) {
     throw exc;
   }
   if (gate) return gate;
-  if (!c.jiraWriter.enabled) return 'Anlegen in Jira ist im Prototyp abgeschaltet. Text kopieren und in Jira einfügen.';
+  if (!c.jiraWriter.enabled) return 'Diese Fassung liest nur. Text kopieren und in Jira einfügen.';
   return null;
 }
 
