@@ -156,6 +156,20 @@ test('Fehlermeldungen von UrlFetch nennen keine Zugangsdaten', () => {
   assert.ok(!/zweite Zeile/.test(msg));
 });
 
+test('Fehlerantwort: Begründung von Jira wird angezeigt, ohne Tokens; HTML-Seite wird erkannt', () => {
+  const answers = [
+    [JSON.stringify({ errorMessages: ["Der Wert 'ADF' existiert nicht für das Feld 'project'."], errors: {} }), /HTTP 400: Der Wert 'ADF' existiert nicht/],
+    [JSON.stringify({ errorMessages: [], errors: { jql: 'Fehler bei token=abc123' } }), /jql: Fehler bei token=…/],
+    ['<!DOCTYPE html><html>Login</html>', /HTML-Seite/],
+  ];
+  for (const [text, rx] of answers) {
+    const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'live', JIRA_URL: 'https://jira.x', JIRA_PAT: 'geheim' }, fetch: () => ({ code: 400, text }) });
+    const err = call(rt, 'GET', '/').ctx.issues_error;
+    assert.ok(rx.test(err), err);
+    assert.ok(!/geheim|abc123/.test(err), err);
+  }
+});
+
 test('Ticketliste: 250 Zeilen je Paket, „Weitere laden“ bis zur Obergrenze', () => {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
   const base = rt.MOCK_DATA.issues.filter((i) => !String(i.key).startsWith('ADFCR'));

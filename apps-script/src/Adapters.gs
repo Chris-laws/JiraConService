@@ -71,7 +71,9 @@ function requestJson(method, url, options) {
     if (attempt < retries && TRANSIENT_CODES_.indexOf(code) >= 0) { backoff_(attempt); continue; }
     break;
   }
-  if (code < 200 || code >= 300) throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code);
+  if (code < 200 || code >= 300) {
+    throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code + errorDetail_(resp));
+  }
   try {
     return JSON.parse(resp.getContentText());
   } catch (e) {
@@ -80,6 +82,27 @@ function requestJson(method, url, options) {
 }
 
 /** Erste Zeile der Fehlermeldung, ohne Query-Teile von Adressen (dort könnten Tokens stehen). */
+/**
+ * Begründung aus der Fehlerantwort, damit man sieht, WARUM (z. B. Jira: „Das Projekt ADF existiert nicht“).
+ * Jira: errorMessages/errors, Confluence: message, ServiceNow: error.message. Gekürzt und ohne Tokens.
+ */
+function errorDetail_(resp) {
+  var text = '';
+  try { text = String(resp.getContentText() || ''); } catch (e) { return ''; }
+  var parts = [];
+  try {
+    var d = JSON.parse(text);
+    if (d && Array.isArray(d.errorMessages)) parts = parts.concat(d.errorMessages);
+    if (d && d.errors && typeof d.errors === 'object') Object.keys(d.errors).forEach(function (k) { parts.push(k + ': ' + d.errors[k]); });
+    if (d && typeof d.message === 'string') parts.push(d.message);
+    if (d && d.error && typeof d.error.message === 'string') parts.push(d.error.message);
+  } catch (e) {
+    if (/<html|<!doctype/i.test(text)) parts.push('Antwort ist eine HTML-Seite (Anmeldeseite oder Proxy statt Jira-API?)');
+  }
+  var msg = parts.map(String).join(' | ').replace(/\s+/g, ' ').trim();
+  return msg ? ': ' + safeFetchMessage_({ message: msg }).slice(0, 240) : '';
+}
+
 function safeFetchMessage_(exc) {
   var msg = exc && exc.message ? String(exc.message).split('\n')[0] : 'Netzwerkfehler';
   return msg
