@@ -246,6 +246,84 @@ test('Cache wie Apps Script: höchstens 1.000 Einträge, die kurzlebigen fliegen
   assert.strictEqual(c.get('lang1'), null);
 });
 
+test('Ladezeit: unveränderte Seite kommt als {same}, Messwerte mit _perf, Log-Zeile je Aufruf', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const first = call(rt, 'GET', '/streams');
+  assert.ok(first.etag && first.template);
+  const again = call(rt, 'GET', '/streams', { _etag: [first.etag] });
+  assert.deepStrictEqual(again, { same: true, etag: first.etag });
+  assert.ok(call(rt, 'GET', '/streams', { _etag: ['alt'] }).template, 'anderer Stand liefert die ganze Seite');
+  const perf = call(rt, 'GET', '/', { _perf: ['1'] }).perf;
+  assert.ok(perf && perf.ms >= 0 && perf.bytes > 0, JSON.stringify(perf));
+  assert.ok(rt.__logs.some((l) => /^api GET \/ \d+ ms/.test(l)), 'Log-Zeile „api <route> <ms> ms“');
+  assert.strictEqual(call(rt, 'POST', '/sprache', { lang: ['de'] }).etag, undefined, 'POST ohne Kennung');
+});
+
+test('Netz wackelt: GET wird mit Wartezeit wiederholt, POST nicht', () => {
+  const log = [];
+  let fails = 0;
+  const systems = fakeSystems(log);
+  const flaky = (url, req) => (req.method === 'get' && /rest\/api\/2\/search/.test(url) && fails++ < 2 ? { code: 503, text: '' } : systems(url, req));
+  const rt = createRuntime({ scriptProperties: LIVE, fetch: flaky, email: 'chris@firma.de' });
+  assert.strictEqual(call(rt, 'GET', '/').ctx.issues_error, null, 'nach zwei 503 klappt der dritte Versuch');
+  let posts = 0;
+  const rt2 = createRuntime({ scriptProperties: Object.assign({}, LIVE, { JIRA_WRITE_ENABLED: 'true' }),
+    fetch: (url, req) => { if (req.method === 'post' && /rest\/api\/2\/issue$/.test(url)) { posts++; return { code: 503, text: '' }; } return systems(url, req); } });
+  assert.throws(() => new rt2.JiraRestWriter(rt2.loadSettings()).createIssue({ summary: 's' }));
+  assert.strictEqual(posts, 1, 'Anlegen wird nie doppelt geschickt');
+});
+
+test('KI-Tageslimit je Person: danach Regel-Logik mit Hinweis', () => {
+  const log = [];
+  const rt = createRuntime({ scriptProperties: Object.assign({}, LIVE, { LLM_DAILY_LIMIT: '2' }), fetch: fakeSystems(log), email: 'a@firma.de' });
+  for (let i = 0; i < 2; i++) assert.strictEqual(call(rt, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] }).ctx.answer.source, 'gemini');
+  const third = call(rt, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] }).ctx.answer;
+  assert.notStrictEqual(third.source, 'gemini');
+  assert.ok(/Tageslimit/.test(third.notice), third.notice);
+  const other = createRuntime({ scriptProperties: Object.assign({}, LIVE, { LLM_DAILY_LIMIT: '2' }), fetch: fakeSystems(log), email: 'b@firma.de', cache: rt.__cache });
+  assert.strictEqual(call(other, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] }).ctx.answer.source, 'gemini', 'andere Person hat eigenes Limit');
+});
+
+test('Seite ohne Kommentare (minify): Vorlagen liefern Zeichen für Zeichen dasselbe HTML, Skripte sind gültig', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const { stripHtml, stripJs } = require('./minify');
+  const SRC = path.join(__dirname, '..', 'src');
+  const script = (html) => /<script>([\s\S]*)<\/script>/.exec(html)[1];
+  const load = (strip) => {
+    const sandbox = { MARK_SRC: 'mark.svg', URLSearchParams, Intl, Date, Math, JSON };
+    vm.createContext(sandbox);
+    for (const f of ['JsI18n', 'JsHelpers', 'JsTemplates']) {
+      const html = fs.readFileSync(path.join(SRC, f + '.html'), 'utf8');
+      vm.runInContext(script(strip ? stripHtml(html) : html), sandbox);
+    }
+    return sandbox;
+  };
+  const a = load(false), b = load(true);
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const pages = PAGES.map(([m, p]) => call(rt, m, p)).concat([call(rt, 'GET', '/ticket', { beispiel: ['1'] }), call(rt, 'GET', '/wissen', { frage: ['Bestellvorschlag'] })]);
+  let n = 0;
+  for (const res of pages) {
+    for (const lang of ['de', 'en']) {
+      // Jede Fassung bekommt eine eigene Kopie: manche Vorlagen sortieren Listen im Kontext um.
+      const copy = () => JSON.parse(JSON.stringify(Object.assign({}, res.ctx, { lang, query_string: '' })));
+      const ca = copy(), cb = copy();
+      a.CTX = ca; b.CTX = cb;
+      assert.strictEqual(b.TEMPLATES[res.template](cb), a.TEMPLATES[res.template](ca), res.template + ' ' + lang);
+      n++;
+    }
+  }
+  assert.ok(n >= 20);
+  for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.html'))) {
+    const out = stripHtml(fs.readFileSync(path.join(SRC, f), 'utf8'));
+    (out.match(/<script>([\s\S]*?)<\/script>/g) || []).forEach((s) => new vm.Script(s.slice(8, -9).replace(/<\?!?=[\s\S]*?\?>/g, '0'), { filename: f }));
+    assert.ok(!/<!--/.test(out), f + ' enthält noch HTML-Kommentare');
+  }
+  assert.strictEqual(stripJs("var a = 1 / 2; // x\nvar r = /\\/\\/[^/]*/g; /* y */ var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;"),
+    "var a = 1 / 2;\nvar r = /\\/\\/[^/]*/g;  var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;");
+});
+
 test('Gebündelte Fassung (bundle/) ist aktuell und rechnet gleich', () => {
   const fs = require('fs');
   const path = require('path');

@@ -197,6 +197,7 @@ function loadSettings(props) {
     vertexProjectId: project,
     vertexLocation: prop_(props, 'VERTEX_LOCATION') || 'global',
     geminiModel: prop_(props, 'GEMINI_MODEL') || 'gemini-2.5-flash',
+    llmDailyLimit: Math.max(0, parseInt(prop_(props, 'LLM_DAILY_LIMIT') || '200', 10) || 0),
     vertexEmbeddingModel: prop_(props, 'VERTEX_EMBEDDING_MODEL') || 'text-multilingual-embedding-002',
     embeddings: embeddings,
     jiraUrl: prop_(props, 'JIRA_URL'),

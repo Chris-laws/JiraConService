@@ -189,5 +189,7 @@ function blocked_(c, form, edited, streamName, multi, reporter, gate) {
 function ticketCreate(c, form, reporter, multi) {
   var edited = formToDraft(form);
   var stream = form.stream ? streamById(form.stream) : null;
-  return c.jiraWriter.createIssue(issueFields(edited, payloadOptions_(form, stream ? stream.name : null, multi, reporter)));
+  var key = c.jiraWriter.createIssue(issueFields(edited, payloadOptions_(form, stream ? stream.name : null, multi, reporter)));
+  bumpCacheVersion_('jira'); // neues Ticket sofort in Listen und Duplikatprüfung
+  return key;
 }

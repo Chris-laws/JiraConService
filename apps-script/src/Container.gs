@@ -22,7 +22,7 @@ function buildContainer(settings) {
   }
   c.changes = c.servicenow;
 
-  c.llm = s.vertexProjectId ? new VertexLlm(s.vertexProjectId, s.vertexLocation, s.geminiModel) : new OfflineLlm();
+  c.llm = s.vertexProjectId ? new VertexLlm(s.vertexProjectId, s.vertexLocation, s.geminiModel, s.llmDailyLimit) : new OfflineLlm();
   c.embedder = s.embeddings === 'vertex'
     ? new FallbackEmbedder(new VertexEmbedder(s.vertexProjectId, s.vertexLocation, s.vertexEmbeddingModel), c.notices)
     : new HashingEmbedder();

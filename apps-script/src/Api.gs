@@ -17,15 +17,48 @@ var MAX_TURNS = 6; // so viele frühere Fragen bleiben im Assistenten sichtbar
 var QUESTIONS = ['Wie werden Teillieferungen im Wareneingang erfasst?', 'Was hat sich im Release 2026.10.2 geändert?',
   'Was muss in ein Anforderungs-Ticket?'];
 
+/**
+ * Einziger Einstieg für die Oberfläche. Zusätzlich zu den Formularfeldern versteht er:
+ *   _etag   Kennung des Stands, den der Browser schon hat. Ist die Seite unverändert, kommt nur {same: true}.
+ *   _perf   1 = Messwerte mitschicken (Dauer, Aufrufe an Jira & Co., Cache), für ?perf=1.
+ * Jeder Aufruf schreibt „api <Methode> <Pfad> <ms> ms“ ins Ausführungsprotokoll.
+ */
 function apiRequest(method, path, params) {
+  var started = Date.now();
+  perfReset_();
+  method = String(method || 'GET').toUpperCase();
+  path = String(path || '/');
+  params = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+  var etag = last_(params, '_etag'), wantPerf = last_(params, '_perf') === '1';
+  var clean = {};
+  Object.keys(params).forEach(function (k) { if (k.charAt(0) !== '_') clean[k] = params[k]; });
   var response;
   try {
-    response = route_(String(method || 'GET').toUpperCase(), String(path || '/'), params || {});
+    response = route_(method, path, clean);
   } catch (exc) {
     console.error(exc && exc.stack ? exc.stack : exc);
     response = { fatal: exc && exc.message ? exc.message : String(exc) };
   }
-  return JSON.stringify(response);
+  if (method === 'GET' && response.template) {
+    response.etag = etagOf_(response);
+    if (etag && etag === response.etag) response = { same: true, etag: etag };
+  }
+  var text = JSON.stringify(response);
+  var ms = Date.now() - started;
+  if (wantPerf) {
+    response.perf = { ms: ms, bytes: text.length, fetches: PERF_.fetches, fetchMs: PERF_.fetchMs, cacheHits: PERF_.cacheHits, cacheMisses: PERF_.cacheMisses };
+    text = JSON.stringify(response);
+  }
+  console.log('api ' + method + ' ' + path + ' ' + ms + ' ms' + (PERF_.fetches ? ' (' + PERF_.fetches + ' Abrufe)' : ''));
+  return text;
+}
+
+/** Kennung einer Seite ohne die Uhrzeit, damit gleicher Inhalt gleich bleibt. */
+function etagOf_(response) {
+  var ctx = {};
+  Object.keys(response.ctx || {}).forEach(function (k) { if (k !== 'now') ctx[k] = response.ctx[k]; });
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, response.template + '\n' + JSON.stringify(ctx), Utilities.Charset.UTF_8);
+  return Utilities.base64EncodeWebSafe(digest.slice(0, 12));
 }
 
 function safeDecode_(text) {

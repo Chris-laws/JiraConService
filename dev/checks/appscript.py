@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
+import subprocess
 
 from dev.checks.base import ROOT, Result, sh, tracked_files
 
@@ -49,8 +51,44 @@ def stress() -> Result:
     return _node("apps-script/dev/stress.js", "--quick", tail=6)
 
 
+BUDGETS = "apps-script/dev/budgets.json"
+
+
+def _ratchet() -> list[str]:
+    """Budgets dürfen nur sinken: jeder Zahlenwert höchstens so hoch wie im letzten Commit."""
+    proc = subprocess.run(["git", "show", "HEAD:" + BUDGETS], cwd=ROOT, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        return []  # neu angelegt: noch nichts zu vergleichen
+    old, new = json.loads(proc.stdout), json.loads((ROOT / BUDGETS).read_text(encoding="utf-8"))
+    raised = []
+    for group in ("page", "response", "load"):
+        for key, value in new.get(group, {}).items():
+            before = old.get(group, {}).get(key)
+            if (
+                isinstance(value, (int, float))
+                and isinstance(before, (int, float))
+                and key != "users"
+                and value > before
+            ):
+                raised.append(f"budgets.json {group}.{key}: {before} → {value} (Ratsche: nur senken)")
+            if key == "users" and isinstance(before, (int, float)) and value < before:
+                raised.append(f"budgets.json load.users: {before} → {value} (Ziel darf nicht kleiner werden)")
+    return raised
+
+
+def budget() -> Result:
+    res = _node("apps-script/dev/budget.js", tail=6)
+    raised = _ratchet()
+    return Result(res.ok and not raised, res.details + raised)
+
+
+def load() -> Result:
+    return _node("apps-script/dev/load.js", "--quick", tail=8)
+
+
 def ui() -> Result:
-    return _node("apps-script/dev/ui-check.js", tail=15)
+    """Prüft die ausgelieferte, gekürzte Oberfläche (bundle/Index.html) im Browser."""
+    return _node("apps-script/dev/ui-check.js", "--bundle", tail=15)
 
 
 def brand() -> Result:

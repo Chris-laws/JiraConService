@@ -224,9 +224,13 @@ function vertexCache() {
   if (cacheStats.evictions) fail('Cache läuft über 1.000 Einträge, Einträge werden verdrängt');
 }
 
-console.log('Stresstest Apps-Script-Fassung' + (QUICK ? ' (kurz)' : ''));
-SIZES.forEach(volume);
-vertexCache();
-robustness();
-console.log(failures ? `\n${failures} Probleme gefunden` : '\nKeine Probleme gefunden');
-process.exitCode = failures ? 1 : 0;
+module.exports = { makeSystems, measure, LIVE, ROUTES, LATENCY };
+
+if (require.main === module) {
+  console.log('Stresstest Apps-Script-Fassung' + (QUICK ? ' (kurz)' : ''));
+  SIZES.forEach(volume);
+  vertexCache();
+  robustness();
+  console.log(failures ? `\n${failures} Probleme gefunden` : '\nKeine Probleme gefunden');
+  process.exitCode = failures ? 1 : 0;
+}

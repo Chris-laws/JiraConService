@@ -102,6 +102,7 @@ besten Textstellen der Quellen.
 | `SERVICENOW_URL`, `SERVICENOW_TOKEN` | ServiceNow-Table-API für Incidents und Changes |
 | `DOCS_FOLDER_ID` | Optional: Drive-Ordner mit Markdown-Dateien für Anleitungen, Schulungen, Change Log |
 | `USER_ROLES` | Optional: Rollen als JSON, z. B. `{"vorname.nachname@firma.de": "INT"}` |
+| `LLM_DAILY_LIMIT` | KI-Aufrufe je Person und Tag (Standard 200, `0` = kein Limit). Danach rechnet die App mit Regeln weiter und zeigt einen Hinweis |
 
 Werte, die mit `PLATZHALTER` beginnen, gelten als nicht gesetzt. Streams, Epics, Prioritäten, Lebenszyklus und
 Länder stehen oben in `Code.gs` (Abschnitt `Config.gs`, Objekte `SETTINGS` und `STREAMS`). Neuer Stream = neuer
@@ -151,7 +152,10 @@ node apps-script/dev/test.js          # Tests (Testdaten, Live-Adapter mit nachg
 node apps-script/dev/server.js        # Vorschau mit Testdaten: http://127.0.0.1:8790/
 node apps-script/dev/bundle.js        # bundle/ nach Änderungen in src/ neu erzeugen
 node apps-script/dev/stress.js        # Stresstest: 500 bis 5.000 Tickets, Cache-Grenzen, Fuzzing (--quick: kürzer)
-node apps-script/dev/ui-check.js      # Browser-Prüfung: XSS, Kontrast, Schrift, A11y, Layout, Englisch (braucht Playwright)
+node apps-script/dev/ui-check.js      # Browser-Prüfung: XSS, Kontrast, Schrift, A11y, Layout, Englisch, Laden (--bundle: ausgelieferte Fassung)
+node apps-script/dev/budget.js        # Budgets: Seitengröße, größte Antwort, Laufzeit mit Cache (Grenzen in dev/budgets.json)
+node apps-script/dev/load.js          # Lastsimulation: 100 bis 1.000 Personen bei 30 gleichzeitigen Ausführungen (--quick: kürzer)
+LATENCY=1200 node apps-script/dev/server.js   # Vorschau mit Wartezeit wie in Apps Script, um Skelette und Cache zu sehen
 npm run guard                         # kompletter Guard (Python-Prototyp und Apps Script)
 ```
 
@@ -177,6 +181,48 @@ Der Script-Cache hält höchstens 1.000 Einträge für alle Nutzer zusammen und 
 Jira, Confluence und ServiceNow liegen in Teilen zu höchstens 96 KB, die Vektoren in 128 Fächern. Bei 5.000 Tickets
 sind das etwa 560 Einträge. Google kann Einträge trotzdem früher löschen; dann lädt bzw. rechnet die App neu
 (langsamer, aber korrekt). Im Cache liegen auch ServiceNow-Melder, nur serverseitig und höchstens 5 Minuten.
+
+### Ladezeiten
+
+Was die App tut, damit Seiten schnell erscheinen:
+
+- **Start:** Index.html schickt die erste Anfrage sofort ab, noch bevor die Skripte gelesen sind. Bis die Antwort
+  da ist, steht ein Gerüst in Seitenform. Die Schrift lädt nebenher, bis dahin gilt die Systemschrift.
+- **Letzter Stand aus dem Browser:** Übersicht, Ticketlisten, Systementwicklung, Bugs, Dokumentation und Admin
+  liegen nach dem ersten Besuch im Browser (höchstens 12 Seiten, nur für die angemeldete Person). Sie erscheinen
+  sofort; dann fragt die App mit einer Kennung (etag) nach. Ist nichts neu, kommt nur `{same: true}` zurück,
+  sonst die neue Seite, ohne dass Blätterposition, Fokus oder Eingabe verloren gehen.
+- **Ladeanzeige nach Dauer:** bis 100 ms nichts, dann der dünne Balken oben, ab 1 s ein Skelett der Zielseite.
+- **Vorladen:** Ruht der Zeiger 80 ms auf einem Link, holt die App die Seite schon (höchstens eine Anfrage
+  gleichzeitig je Browser).
+- **Server:** Listen aus Jira, Confluence und ServiceNow liegen 5 Minuten im Script-Cache. Ein neues Ticket erhöht
+  die Versionsnummer der Jira-Listen, damit niemand den alten Stand sieht. Lesende Aufrufe an Jira & Co. werden bei
+  Netzfehlern und 429/502/503/504 bis zu zweimal wiederholt (wachsende, zufällige Wartezeit); Anlegen nie.
+- **Überlast:** Apps Script führt für alle Nutzer zusammen höchstens 30 Aufrufe gleichzeitig aus. Der Browser
+  wiederholt eine abgelehnte Seite bis zu zweimal mit Wartezeit.
+- **Kleine Seite:** Die ausgelieferte Oberfläche hat keine Kommentare (`dev/minify.js`); ein Test zeigt, dass die
+  Vorlagen danach Zeichen für Zeichen dasselbe HTML liefern.
+
+**Messen:** Web-App-Adresse mit `?perf=1` öffnen. Unten rechts erscheint eine Tafel mit der Zeit bis zur ersten
+Seite und je Aufruf: Dauer im Browser, Rechenzeit auf dem Server, Größe, Aufrufe an Jira & Co. und Cache-Treffer.
+Im Ausführungsprotokoll von Apps Script steht je Aufruf eine Zeile `api GET /tickets 412 ms`.
+
+**Budgets als Ratsche:** `dev/budgets.json` legt Grenzen fest (Seite roh ≤ 240 KB, gzip ≤ 60 KB, größte Antwort
+≤ 220 KB, Aufruf mit Cache ≤ 3 s, bei 300 gleichzeitig aktiven Personen p95 ≤ 3 s und höchstens 0,5 % gescheiterte
+Aufrufe). Der Guard prüft sie und lässt die Werte nur sinken.
+
+Lastsimulation (Modell: Start 150 ms, Rechnen × 2,5, Jira & Co. 400 ms, Vertex 700 ms, Cache 15 ms je Zugriff,
+google.script.run 250 ms; jede Person öffnet alle 30 s eine Seite):
+
+| aktive Personen | p50 | p95 | gescheitert nach Wiederholung | höchste Gleichzeitigkeit |
+|---|---|---|---|---|
+| 100 | etwa 0,6 s | etwa 1,7 s | 0 % | 9 von 30 |
+| 300 | etwa 0,6 s | etwa 1,6 s | 0 % | 16 von 30 |
+| 1.000 | etwa 0,6 s | etwa 1,6 s | etwa 0,02 % | 30 von 30 |
+
+Ab etwa 1.000 gleichzeitig aktiven Personen ist das Kontingent voll. Dann hilft eine zweite Bereitstellung unter
+einem anderen Konto oder `executeAs: USER_ACCESSING` (jede Person bringt ihr eigenes Kontingent mit, braucht dann aber
+selbst die Vertex-Rolle im Google-Cloud-Projekt).
 
 Mit [clasp](https://github.com/google/clasp): `.clasp.json.example` nach `.clasp.json` kopieren, `scriptId`
 eintragen, dann im Ordner `apps-script/` `clasp push`. Dabei landen die Dateien aus `src/` einzeln im Projekt.

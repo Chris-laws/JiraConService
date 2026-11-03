@@ -64,7 +64,10 @@ function startServer() {
       });
       return;
     }
-    const html = renderIndex({ appName: rt.loadSettings().appName, startPath: '' }).replace('<body>', '<body>\n' + shim);
+    // --bundle: die ausgelieferte, gekürzte Fassung (bundle/Index.html) statt src/ prüfen.
+    const vars = { appName: rt.loadSettings().appName, startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
+    const tpl = process.argv.includes('--bundle') ? require('fs').readFileSync(require('path').join(__dirname, '..', 'bundle', 'Index.html'), 'utf8') : undefined;
+    const html = renderIndex(vars, tpl).replace('<body>', '<body>\n' + shim);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html);
   });
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => ok(server)));
@@ -178,6 +181,27 @@ function audit() {
         for (const [rule, keys, msg] of (await page.evaluate(audit)).filter((r) => r[0] === 'xss')) note(rule, keys, `${path} Eingabe`, msg);
       }
     }
+    await ctx.close();
+  }
+  // Laden: Neuladen zeigt den letzten Stand sofort, die eine Startanfrage trägt die Kennung und bekommt nur {same};
+  // ?perf=1 zeigt die Messtafel.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => note('js', ['window'], 'laden', e.message));
+    const calls = [], answers = [];
+    page.on('request', (r) => { if (r.url().endsWith('/api')) calls.push(JSON.parse(r.postData() || '[]')); });
+    page.on('response', async (r) => { if (r.url().endsWith('/api')) { try { answers.push(JSON.parse((await r.json()).result)); } catch (e) { /* egal */ } } });
+    await page.goto(base + '?perf=1#/tickets', { waitUntil: 'networkidle' });
+    calls.length = 0; answers.length = 0;
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForTimeout(300);
+    const start = calls.filter((c) => c[1] === '/tickets');
+    if (start.length !== 1) note('laden', ['boot'], '/tickets', `Neuladen schickt ${start.length} Anfragen für die Seite statt einer`);
+    else if (!start[0][2]._etag) note('laden', ['etag'], '/tickets', 'Neuladen fragt ohne Kennung (etag) nach');
+    if (!answers.some((a) => a.same)) note('laden', ['same'], '/tickets', 'unveränderte Seite kam nicht als {same}');
+    if (!(await page.locator('main.sheet .appbar-title').count())) note('laden', ['cache'], '/tickets', 'Seite nach Neuladen nicht gezeichnet');
+    if (!/api \/tickets \d+ ms/.test(await page.locator('#perf-panel').innerText().catch(() => ''))) note('laden', ['perf'], '/tickets', '?perf=1 zeigt keine Messtafel');
     await ctx.close();
   }
   await browser.close();

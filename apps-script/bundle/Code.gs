@@ -21,10 +21,24 @@ function doGet(e) {
   var template = HtmlService.createTemplateFromFile('Index');
   template.appName = settings.appName;
   template.startPath = (e && e.parameter && e.parameter.seite) ? String(e.parameter.seite) : '';
+  template.perf = !!(e && e.parameter && e.parameter.perf === '1');
+  template.viewer = viewerKey_();
   return template.evaluate()
     .setTitle(settings.appName)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+/**
+ * Kurze, nicht rückrechenbare Kennung der angemeldeten Person. Der Browser hält den Seiten-Cache nur für diese
+ * Kennung; meldet sich im selben Browser jemand anderes an, wird der Cache verworfen. Leer = kein Seiten-Cache.
+ */
+function viewerKey_() {
+  var who = '';
+  try { who = String(Session.getActiveUser().getEmail() || ''); } catch (e) { who = ''; }
+  if (!who) { try { who = String(Session.getTemporaryActiveUserKey() || ''); } catch (e) { who = ''; } }
+  if (!who) return '';
+  return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'viewer:' + who)).slice(0, 16);
 }
 
 /** Bindet eine weitere HTML-Datei (CSS, Skripte) in Index.html ein. */
@@ -233,6 +247,7 @@ function loadSettings(props) {
     vertexProjectId: project,
     vertexLocation: prop_(props, 'VERTEX_LOCATION') || 'global',
     geminiModel: prop_(props, 'GEMINI_MODEL') || 'gemini-2.5-flash',
+    llmDailyLimit: Math.max(0, parseInt(prop_(props, 'LLM_DAILY_LIMIT') || '200', 10) || 0),
     vertexEmbeddingModel: prop_(props, 'VERTEX_EMBEDDING_MODEL') || 'text-multilingual-embedding-002',
     embeddings: embeddings,
     jiraUrl: prop_(props, 'JIRA_URL'),
@@ -503,6 +518,11 @@ function sortBy(list, keyFn, reverse) {
 
 function upper(s) { return String(s || '').toUpperCase(); }
 
+// ---------- Messwerte je Aufruf (für ?perf=1 und das Ausführungsprotokoll) ----------
+
+var PERF_ = { fetches: 0, fetchMs: 0, cacheHits: 0, cacheMisses: 0 };
+function perfReset_() { PERF_ = { fetches: 0, fetchMs: 0, cacheHits: 0, cacheMisses: 0 }; }
+
 // ======================================================= Adapters.gs
 
 /**
@@ -544,13 +564,25 @@ function requestJson(method, url, options) {
     req.contentType = 'application/json';
     req.payload = JSON.stringify(options.json);
   }
-  var resp;
-  try {
-    resp = UrlFetchApp.fetch(url, req);
-  } catch (exc) {
-    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
+  // Lesen wird bei vorübergehenden Fehlern (429, 502–504, Netz) bis zu zweimal wiederholt,
+  // mit wachsender, zufälliger Wartezeit. Schreiben nie, damit nichts doppelt angelegt wird.
+  var retries = options.retries !== undefined ? options.retries : (method === 'GET' ? 2 : 0);
+  var resp, code;
+  for (var attempt = 0; ; attempt++) {
+    var t0 = Date.now();
+    PERF_.fetches++;
+    try {
+      resp = UrlFetchApp.fetch(url, req);
+      code = resp.getResponseCode();
+    } catch (exc) {
+      PERF_.fetchMs += Date.now() - t0;
+      if (attempt < retries) { backoff_(attempt); continue; }
+      throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
+    }
+    PERF_.fetchMs += Date.now() - t0;
+    if (attempt < retries && TRANSIENT_CODES_.indexOf(code) >= 0) { backoff_(attempt); continue; }
+    break;
   }
-  var code = resp.getResponseCode();
   if (code < 200 || code >= 300) throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code);
   try {
     return JSON.parse(resp.getContentText());
@@ -568,6 +600,14 @@ function safeFetchMessage_(exc) {
     .replace(/\b((?:access_)?token|key|api_?key|pat|password|secret|sig)=[^&\s"']*/gi, '$1=…')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer …')
     .slice(0, 300);
+}
+
+var TRANSIENT_CODES_ = [429, 502, 503, 504];
+
+/** Wartezeit vor einer Wiederholung: 0,4 s, 1,2 s … mit ±50 % Zufall gegen gleichzeitige Wiederholungen. */
+function backoff_(attempt) {
+  var base = 400 * Math.pow(3, attempt);
+  Utilities.sleep(Math.round(base * (0.5 + Math.random())));
 }
 
 function bearer_(token, extra) {
@@ -892,9 +932,17 @@ MockDocuments.prototype.documents = function () {
 
 var CACHE_SECONDS_ = 300;
 
+/** Versions-Token je Datenquelle: ein Schreibvorgang setzt ein neues, alte Cache-Stände gelten dann nicht mehr. */
+function cacheVersion_(cache, group) { return cache.get('ver:' + group) || '0'; }
+function bumpCacheVersion_(group) {
+  try { CacheService.getScriptCache().put('ver:' + group, String(Date.now()), 21600); } catch (e) { /* egal */ }
+}
+
 function cachedList_(cacheKey, loader, dateFields) {
   var cache = CacheService.getScriptCache();
+  cacheKey = cacheKey + '@' + cacheVersion_(cache, cacheKey.split(':')[0]);
   var raw = readChunked_(cache, cacheKey);
+  if (raw) PERF_.cacheHits++; else PERF_.cacheMisses++;
   if (raw) {
     try {
       return JSON.parse(raw).map(function (row) {
@@ -1011,18 +1059,40 @@ function parseGeminiText(data) {
   }
 }
 
-function VertexLlm(project, location, model) {
+function VertexLlm(project, location, model, dailyLimit) {
   this.available = true;
   this.project = project;
   this.location = location;
   this.model = model;
+  this.dailyLimit = dailyLimit === undefined ? 200 : dailyLimit;
 }
 VertexLlm.prototype.generate = function (prompt, jsonMode) {
+  llmBudget_(this.dailyLimit);
   var data = requestJson('POST', vertexModelUrl(this.project, this.location, this.model, 'generateContent'), {
     headers: vertexHeaders(this.project), json: generateBody(prompt, !!jsonMode), error: LlmUnavailable
   });
   return parseGeminiText(data);
 };
+
+/**
+ * Tageslimit je Person (Script Property LLM_DAILY_LIMIT, Standard 200, 0 = aus). Alle Nutzer teilen sich die
+ * Kontingente des Projekts; damit eine Person sie nicht allein aufbraucht, zählt der Script-Cache die Aufrufe je
+ * Tag und Person (ein Eintrag; der Schlüssel enthält das Datum, jeder Aufruf hält ihn 6 h, die Cache-Höchstdauer).
+ * Ist das Limit erreicht, rechnen die Services mit ihrer Regel-Logik weiter und zeigen einen Hinweis.
+ */
+function llmBudget_(limit) {
+  if (!limit) return;
+  var who = '';
+  try { who = String(Session.getActiveUser().getEmail() || ''); } catch (e) { who = ''; }
+  if (!who) { try { who = Session.getTemporaryActiveUserKey(); } catch (e) { who = 'anon'; } }
+  var day = Utilities.formatDate(new Date(), 'Etc/UTC', "yyyy-MM-dd'T'HH:mm:ss").slice(0, 10);
+  var hash = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, who)).slice(0, 16);
+  var key = 'llmday:' + day + ':' + hash;
+  var cache = CacheService.getScriptCache();
+  var used = parseInt(cache.get(key) || '0', 10) || 0;
+  if (used >= limit) throw new LlmUnavailable('Tageslimit für KI-Aufrufe erreicht (' + limit + ' je Person). Ab morgen wieder mit KI.');
+  cache.put(key, String(used + 1), 21600);
+}
 
 /** Ohne Projekt-ID: keine KI, die Services nutzen ihre regelbasierte Offline-Logik. */
 function OfflineLlm() { this.available = false; }
@@ -1731,7 +1801,7 @@ function buildContainer(settings) {
   }
   c.changes = c.servicenow;
 
-  c.llm = s.vertexProjectId ? new VertexLlm(s.vertexProjectId, s.vertexLocation, s.geminiModel) : new OfflineLlm();
+  c.llm = s.vertexProjectId ? new VertexLlm(s.vertexProjectId, s.vertexLocation, s.geminiModel, s.llmDailyLimit) : new OfflineLlm();
   c.embedder = s.embeddings === 'vertex'
     ? new FallbackEmbedder(new VertexEmbedder(s.vertexProjectId, s.vertexLocation, s.vertexEmbeddingModel), c.notices)
     : new HashingEmbedder();
@@ -1972,7 +2042,9 @@ function blocked_(c, form, edited, streamName, multi, reporter, gate) {
 function ticketCreate(c, form, reporter, multi) {
   var edited = formToDraft(form);
   var stream = form.stream ? streamById(form.stream) : null;
-  return c.jiraWriter.createIssue(issueFields(edited, payloadOptions_(form, stream ? stream.name : null, multi, reporter)));
+  var key = c.jiraWriter.createIssue(issueFields(edited, payloadOptions_(form, stream ? stream.name : null, multi, reporter)));
+  bumpCacheVersion_('jira'); // neues Ticket sofort in Listen und Duplikatprüfung
+  return key;
 }
 
 // ======================================================= Views.gs
@@ -2153,15 +2225,48 @@ var MAX_TURNS = 6; // so viele frühere Fragen bleiben im Assistenten sichtbar
 var QUESTIONS = ['Wie werden Teillieferungen im Wareneingang erfasst?', 'Was hat sich im Release 2026.10.2 geändert?',
   'Was muss in ein Anforderungs-Ticket?'];
 
+/**
+ * Einziger Einstieg für die Oberfläche. Zusätzlich zu den Formularfeldern versteht er:
+ *   _etag   Kennung des Stands, den der Browser schon hat. Ist die Seite unverändert, kommt nur {same: true}.
+ *   _perf   1 = Messwerte mitschicken (Dauer, Aufrufe an Jira & Co., Cache), für ?perf=1.
+ * Jeder Aufruf schreibt „api <Methode> <Pfad> <ms> ms“ ins Ausführungsprotokoll.
+ */
 function apiRequest(method, path, params) {
+  var started = Date.now();
+  perfReset_();
+  method = String(method || 'GET').toUpperCase();
+  path = String(path || '/');
+  params = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+  var etag = last_(params, '_etag'), wantPerf = last_(params, '_perf') === '1';
+  var clean = {};
+  Object.keys(params).forEach(function (k) { if (k.charAt(0) !== '_') clean[k] = params[k]; });
   var response;
   try {
-    response = route_(String(method || 'GET').toUpperCase(), String(path || '/'), params || {});
+    response = route_(method, path, clean);
   } catch (exc) {
     console.error(exc && exc.stack ? exc.stack : exc);
     response = { fatal: exc && exc.message ? exc.message : String(exc) };
   }
-  return JSON.stringify(response);
+  if (method === 'GET' && response.template) {
+    response.etag = etagOf_(response);
+    if (etag && etag === response.etag) response = { same: true, etag: etag };
+  }
+  var text = JSON.stringify(response);
+  var ms = Date.now() - started;
+  if (wantPerf) {
+    response.perf = { ms: ms, bytes: text.length, fetches: PERF_.fetches, fetchMs: PERF_.fetchMs, cacheHits: PERF_.cacheHits, cacheMisses: PERF_.cacheMisses };
+    text = JSON.stringify(response);
+  }
+  console.log('api ' + method + ' ' + path + ' ' + ms + ' ms' + (PERF_.fetches ? ' (' + PERF_.fetches + ' Abrufe)' : ''));
+  return text;
+}
+
+/** Kennung einer Seite ohne die Uhrzeit, damit gleicher Inhalt gleich bleibt. */
+function etagOf_(response) {
+  var ctx = {};
+  Object.keys(response.ctx || {}).forEach(function (k) { if (k !== 'now') ctx[k] = response.ctx[k]; });
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, response.template + '\n' + JSON.stringify(ctx), Utilities.Charset.UTF_8);
+  return Utilities.base64EncodeWebSafe(digest.slice(0, 12));
 }
 
 function safeDecode_(text) {

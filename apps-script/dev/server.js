@@ -51,14 +51,17 @@ http.createServer((req, res) => {
       } catch (err) {
         out = { error: err.message };
       }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(out));
+      // LATENCY=ms bildet die Laufzeit von google.script.run nach (in Apps Script etwa 300 bis 1500 ms je Aufruf).
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(out));
+      }, Number(process.env.LATENCY || 0));
     });
     return;
   }
   if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
     const settings = runtime.loadSettings();
-    const vars = { appName: settings.appName, startPath: '' };
+    const vars = { appName: settings.appName, startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
     const html = (BUNDLE ? renderIndex(vars, fs.readFileSync(path.join(BUNDLE_DIR, 'Index.html'), 'utf8')) : renderIndex(vars)).replace('<body>', '<body>\n' + SHIM);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(html);

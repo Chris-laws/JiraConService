@@ -35,18 +35,40 @@ function parseGeminiText(data) {
   }
 }
 
-function VertexLlm(project, location, model) {
+function VertexLlm(project, location, model, dailyLimit) {
   this.available = true;
   this.project = project;
   this.location = location;
   this.model = model;
+  this.dailyLimit = dailyLimit === undefined ? 200 : dailyLimit;
 }
 VertexLlm.prototype.generate = function (prompt, jsonMode) {
+  llmBudget_(this.dailyLimit);
   var data = requestJson('POST', vertexModelUrl(this.project, this.location, this.model, 'generateContent'), {
     headers: vertexHeaders(this.project), json: generateBody(prompt, !!jsonMode), error: LlmUnavailable
   });
   return parseGeminiText(data);
 };
+
+/**
+ * Tageslimit je Person (Script Property LLM_DAILY_LIMIT, Standard 200, 0 = aus). Alle Nutzer teilen sich die
+ * Kontingente des Projekts; damit eine Person sie nicht allein aufbraucht, zählt der Script-Cache die Aufrufe je
+ * Tag und Person (ein Eintrag; der Schlüssel enthält das Datum, jeder Aufruf hält ihn 6 h, die Cache-Höchstdauer).
+ * Ist das Limit erreicht, rechnen die Services mit ihrer Regel-Logik weiter und zeigen einen Hinweis.
+ */
+function llmBudget_(limit) {
+  if (!limit) return;
+  var who = '';
+  try { who = String(Session.getActiveUser().getEmail() || ''); } catch (e) { who = ''; }
+  if (!who) { try { who = Session.getTemporaryActiveUserKey(); } catch (e) { who = 'anon'; } }
+  var day = Utilities.formatDate(new Date(), 'Etc/UTC', "yyyy-MM-dd'T'HH:mm:ss").slice(0, 10);
+  var hash = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, who)).slice(0, 16);
+  var key = 'llmday:' + day + ':' + hash;
+  var cache = CacheService.getScriptCache();
+  var used = parseInt(cache.get(key) || '0', 10) || 0;
+  if (used >= limit) throw new LlmUnavailable('Tageslimit für KI-Aufrufe erreicht (' + limit + ' je Person). Ab morgen wieder mit KI.');
+  cache.put(key, String(used + 1), 21600);
+}
 
 /** Ohne Projekt-ID: keine KI, die Services nutzen ihre regelbasierte Offline-Logik. */
 function OfflineLlm() { this.available = false; }

@@ -1,0 +1,26 @@
+{
+  "_hinweis": "Ratsche: Werte dürfen nur sinken. dev/checks/appscript.py vergleicht mit dem letzten Commit.",
+  "page": {
+    "raw_bytes": 240000,
+    "gzip_bytes": 60000
+  },
+  "response": {
+    "max_bytes": 220000,
+    "warm_exec_ms": 3000
+  },
+  "load": {
+    "users": 300,
+    "p95_ms": 3000,
+    "failed_max": 0.005,
+    "erlang_b_max": 0.01
+  },
+  "model": {
+    "concurrent": 30,
+    "exec_start_ms": 150,
+    "cpu_factor": 2.5,
+    "system_ms": 400,
+    "vertex_ms": 700,
+    "cache_ms": 15,
+    "client_ms": 250
+  }
+}

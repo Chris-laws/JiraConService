@@ -223,3 +223,8 @@ function sortBy(list, keyFn, reverse) {
 }
 
 function upper(s) { return String(s || '').toUpperCase(); }
+
+// ---------- Messwerte je Aufruf (für ?perf=1 und das Ausführungsprotokoll) ----------
+
+var PERF_ = { fetches: 0, fetchMs: 0, cacheHits: 0, cacheMisses: 0 };
+function perfReset_() { PERF_ = { fetches: 0, fetchMs: 0, cacheHits: 0, cacheMisses: 0 }; }

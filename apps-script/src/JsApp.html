@@ -12,23 +12,54 @@
   function store(key, value) { try { localStorage.setItem(key, value); } catch (err) { /* privat: egal */ } }
   function read(key) { try { return localStorage.getItem(key); } catch (err) { return null; } }
 
+  function remove(key) { try { localStorage.removeItem(key); } catch (err) { /* privat: egal */ } }
+  function now() { return Math.round(performance.now()); }
+  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
   // ------------------------------------------------------------ Server
 
-  function callServer(method, path, params) {
+  // Apps Script führt für alle Nutzer zusammen höchstens 30 Aufrufe gleichzeitig aus; darüber kommt ein Fehler.
+  var RETRY_RX = /too many|simultaneous|gleichzeitig|zu viele|invoked too many|network|failed to fetch|timeout|überlastet/i;
+
+  /** Ruft apiRequest auf. GET wird bei Überlast oder Netzfehler bis zu zweimal wiederholt, mit wachsender, zufälliger
+   *  Wartezeit (damit nicht alle zugleich wiederkommen). POST nie: ein Ticket darf nicht doppelt entstehen. */
+  function callServer(method, path, params, attempt) {
+    attempt = attempt || 0;
+    if (window.PERF_ON) { params = Object.assign({}, params || {}); params._perf = ['1']; }
     return new Promise(function (resolve, reject) {
-      google.script.run
-        .withSuccessHandler(function (text) {
-          try { resolve(JSON.parse(text)); } catch (err) { reject(new Error('Antwort nicht lesbar.')); }
-        })
-        .withFailureHandler(function (err) { reject(err instanceof Error ? err : new Error(String(err))); })
-        .apiRequest(method, path, params);
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).apiRequest(method, path, params);
+    }).then(parseAnswer, function (err) {
+      err = err instanceof Error ? err : new Error(String(err));
+      if (method !== 'GET' || attempt >= 2 || !RETRY_RX.test(err.message)) throw err;
+      return wait(500 * Math.pow(3, attempt) * (0.5 + Math.random())).then(function () { return callServer(method, path, params, attempt + 1); });
+    });
+  }
+  function parseAnswer(text) {
+    try { return JSON.parse(text); } catch (err) { throw new Error('Antwort nicht lesbar.'); }
+  }
+
+  /** Die erste Anfrage hat Index.html schon gestartet (BOOT); hier wird sie einmal abgeholt. */
+  function takeBoot(full) {
+    var boot = window.BOOT;
+    if (!boot || boot.used || boot.full !== full) return null;
+    boot.used = true;
+    var p = splitPath(full);
+    return boot.promise.then(parseAnswer, function (err) {
+      err = err instanceof Error ? err : new Error(String(err));
+      if (!RETRY_RX.test(err.message)) throw err;
+      return callServer('GET', p.path, withEtag(paramsFromQuery(p.query), pcGet(full)), 1);
     });
   }
 
   function paramsFromQuery(qs) {
     var out = {};
-    new URLSearchParams(qs || '').forEach(function (value, key) { (out[key] = out[key] || []).push(value); });
+    new URLSearchParams(qs || '').forEach(function (value, key) { if (key.charAt(0) !== '_') (out[key] = out[key] || []).push(value); });
     return out;
+  }
+
+  function withEtag(params, cached) {
+    if (cached && cached.etag) params._etag = [cached.etag];
+    return params;
   }
 
   function paramsFromForm(form, submitter) {
@@ -45,6 +76,69 @@
   function splitPath(full) {
     var i = full.indexOf('?');
     return i < 0 ? { path: full || '/', query: '' } : { path: full.slice(0, i) || '/', query: full.slice(i + 1) };
+  }
+
+  // ------------------------------------------------------------ Seiten-Cache: letzter Stand im Browser
+  // Listen und Übersichten erscheinen sofort aus dem Speicher; danach fragt der Browser mit der Kennung (etag) nach.
+  // Unverändert kommt nur {same}, sonst die neue Seite. Nur für die angemeldete Person (VIEWER), höchstens 12 Seiten.
+
+  var PC = 'pc1:', PC_MAX = 12, PC_ENTRY = 400000, PC_TOTAL = 2500000, PC_FRESH = 15000;
+  var PC_RX = /^\/(tickets|meine-tickets|streams|bugs\/[^/]+|dokumente|releases|admin)?$/;
+
+  function cacheable(full) { return !!window.VIEWER && PC_RX.test(splitPath(full).path); }
+  function pcIndex() { try { return JSON.parse(read('pc-index') || '[]'); } catch (err) { return []; } }
+  function pcEntry(full) { return pcIndex().filter(function (x) { return x.k === full; })[0] || null; }
+  function pcGet(full) {
+    if (!cacheable(full)) return null;
+    try { return JSON.parse(read(PC + full) || 'null'); } catch (err) { return null; }
+  }
+  function pcSaveIndex(index) { store('pc-index', JSON.stringify(index)); }
+  function pcPut(full, res) {
+    if (!cacheable(full) || !res.etag) return;
+    var raw = JSON.stringify({ template: res.template, ctx: res.ctx, etag: res.etag });
+    if (raw.length > PC_ENTRY) return;
+    var index = pcIndex().filter(function (x) { return x.k !== full; });
+    index.unshift({ k: full, etag: res.etag, size: raw.length, t: Date.now() });
+    var total = 0;
+    index = index.filter(function (x, n) {
+      total += x.size;
+      var keep = n < PC_MAX && total <= PC_TOTAL;
+      if (!keep) remove(PC + x.k);
+      return keep;
+    });
+    try { localStorage.setItem(PC + full, raw); pcSaveIndex(index); } catch (err) { pcClear(); }
+  }
+  function pcTouch(full) {
+    var index = pcIndex();
+    index.forEach(function (x) { if (x.k === full) x.t = Date.now(); });
+    pcSaveIndex(index);
+  }
+  function pcFresh(full, ms) { var x = pcEntry(full); return !!x && Date.now() - x.t < ms; }
+  function pcClear() { pcIndex().forEach(function (x) { remove(PC + x.k); }); remove('pc-index'); }
+
+  // ------------------------------------------------------------ Messen (?perf=1)
+
+  var perfRows = [], firstPage = null;
+  function perfNote(full, ms, res, source) {
+    if (firstPage === null && res && (res.template || source === 'Cache')) firstPage = now();
+    if (!window.PERF_ON) return;
+    var s = res && res.perf;
+    var line = 'api ' + full + ' ' + ms + ' ms' + (source ? ' (' + source + ')' : '') + (res && res.same ? ', unverändert' : '') +
+      (s ? ' · Server ' + s.ms + ' ms, ' + (s.bytes / 1024).toFixed(1) + ' KB, ' + s.fetches + ' Abrufe ' + s.fetchMs + ' ms, Cache ' + s.cacheHits + '/' + (s.cacheHits + s.cacheMisses) : '');
+    console.log(line);
+    perfRows.unshift(line);
+    perfRows.length = Math.min(perfRows.length, 12);
+    var panel = document.getElementById('perf-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'perf-panel'; panel.className = 'perf-panel'; panel.setAttribute('role', 'status');
+      document.body.appendChild(panel);
+    }
+    panel.textContent = '';
+    var head = document.createElement('p'); head.innerHTML = '<b>?perf=1</b> ';
+    head.appendChild(document.createTextNode('Start bis erste Seite ' + firstPage + ' ms'));
+    panel.appendChild(head);
+    perfRows.forEach(function (r) { var el = document.createElement('p'); el.textContent = r; el.title = r; panel.appendChild(el); });
   }
 
   // ------------------------------------------------------------ Seitenwechsel
@@ -75,30 +169,119 @@
     load('GET', full, null, anchor);
   });
 
+  // Ladeanzeige nach Dauer: bis 100 ms nichts, dann der dünne Balken oben, ab 1 s ein Skelett in Form der Seite.
+  var seq = 0, skeletonTimer = null;
+  function skeletonLater(my, path) {
+    clearTimeout(skeletonTimer);
+    skeletonTimer = setTimeout(function () {
+      var main = app.querySelector('main.sheet');
+      if (my !== seq || !main) return;
+      var bar = main.querySelector('.appbar');
+      Array.prototype.slice.call(main.children).forEach(function (el) { if (el !== bar) el.remove(); });
+      main.insertAdjacentHTML('beforeend', skeletonFor(path));
+      // Navigation und Titel zeigen schon das Ziel, damit das Skelett nicht zur alten Seite gehört.
+      var target = app.querySelector('.nav a.nav-item[href="#' + path.split('/').slice(0, 2).join('/') + '"]');
+      if (target) {
+        app.querySelectorAll('.nav a.nav-item.is-active').forEach(function (a) { a.classList.remove('is-active'); a.removeAttribute('aria-current'); });
+        target.classList.add('is-active'); target.setAttribute('aria-current', 'page');
+      }
+      var title = main.querySelector('.appbar-title');
+      if (title) title.textContent = target ? target.textContent.replace(/\d+\s*$/, '').trim() : '';
+    }, 1000);
+  }
+  function skeletonFor(path) {
+    function s(cls) { return '<span class="skel ' + cls + '"></span>'; }
+    function rows(n) { var h = ''; for (var i = 0; i < n; i++) h += s('skel-row'); return '<div class="skel-rows">' + h + '</div>'; }
+    var body;
+    if (path === '/') body = '<div class="skel-grid">' + s('skel-kpi') + s('skel-kpi') + s('skel-kpi') + s('skel-kpi') + '</div>' + s('skel-card');
+    else if (/^\/(tickets|meine-tickets|releases|dokumente)$/.test(path)) body = rows(8);
+    else if (/^\/(ticket|wissen|admin)$/.test(path)) body = s('skel-form');
+    else body = s('skel-card') + rows(4);
+    return '<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
+  }
+
   /** GET: Pfad mit Query. POST: Formularfelder als params. */
   function load(method, full, params, anchor, opts) {
     var p = splitPath(full);
     opts = opts || {};
+    var my = ++seq, started = now(), isGet = method === 'GET';
+    var cached = isGet ? pcGet(full) : null;
+    if (cached) {
+      show(cached, method, full, p, anchor, opts);
+      perfNote(full, now() - started, cached, 'Cache');
+      anchor = null;
+      opts = { keepState: true };
+      var bootWaiting = window.BOOT && !window.BOOT.used && window.BOOT.full === full;
+      if (!bootWaiting && pcFresh(full, PC_FRESH)) return Promise.resolve(cached); // gerade erst geholt (z. B. vorgeladen)
+    } else if (isGet) {
+      skeletonLater(my, p.path);
+    }
     setBusy(true);
-    return callServer(method, p.path, method === 'GET' ? paramsFromQuery(p.query) : params).then(function (res) {
+    var boot = isGet ? takeBoot(full) : null;
+    var request = boot || callServer(method, p.path, isGet ? withEtag(paramsFromQuery(p.query), cached) : params);
+    return request.then(function (res) {
+      perfNote(full, now() - started, res, boot ? 'Start' : '');
+      if (my !== seq) return res; // inzwischen auf eine andere Seite gewechselt
       if (res.fatal) throw new Error(res.fatal);
-      if (res.redirect) { navigate(res.redirect); return; }
-      if (res.download) { download(res.download.name, res.download.text); return; }
+      if (res.same) {
+        if (cached) { pcTouch(full); return res; }
+        return callServer(method, p.path, paramsFromQuery(p.query)).then(function (fresh) { return apply(fresh); });
+      }
+      return apply(res);
+    }).catch(function (err) {
+      if (my === seq) showFatal(err.message || String(err));
+      throw err;
+    }).finally(function () {
+      if (my === seq) clearTimeout(skeletonTimer);
+      setBusy(false);
+    });
+
+    function apply(res) {
+      if (my !== seq) return res;
+      if (res.fatal) throw new Error(res.fatal);
+      if (!isGet && /^\/(benutzer|sprache)$/.test(p.path)) pcClear(); // andere Person oder Sprache: alter Stand passt nicht
+      if (res.redirect) { navigate(res.redirect); return res; }
+      if (res.download) { download(res.download.name, res.download.text); return res; }
       if (res.template) {
-        // Nach dem Absenden bleibt die Adresse die der Seite (wie bisher /ticket bzw. /wissen).
-        var shown = method === 'GET' ? full : ({ ticket: '/ticket', knowledge: '/wissen' }[res.template] || p.path);
-        current = splitPath(shown);
-        res.ctx.query_string = current.query;
-        render(res.template, res.ctx, opts);
-        if (method !== 'GET' && hashPath() !== shown) { suppressHash = shown; location.hash = shown; }
-        if (anchor) { var a = document.getElementById(anchor); if (a) a.scrollIntoView(); }
+        if (isGet) pcPut(full, res);
+        show(res, method, full, p, anchor, opts);
       }
       return res;
-    }).catch(function (err) {
-      showFatal(err.message || String(err));
-      throw err;
-    }).finally(function () { setBusy(false); });
+    }
   }
+
+  function show(res, method, full, p, anchor, opts) {
+    // Nach dem Absenden bleibt die Adresse die der Seite (wie bisher /ticket bzw. /wissen).
+    var shown = method === 'GET' ? full : ({ ticket: '/ticket', knowledge: '/wissen' }[res.template] || p.path);
+    current = splitPath(shown);
+    res.ctx.query_string = current.query;
+    render(res.template, res.ctx, opts);
+    if (method !== 'GET' && hashPath() !== shown) { suppressHash = shown; location.hash = shown; }
+    if (anchor) { var a = document.getElementById(anchor); if (a) a.scrollIntoView(); }
+  }
+
+  // ------------------------------------------------------------ Vorladen: Seite holen, sobald der Zeiger auf dem Link ruht
+
+  var prefetching = false, hoverTimer = null;
+  function prefetch(full) {
+    if (prefetching || !cacheable(full) || full === hashPath() || pcFresh(full, 60000)) return;
+    if (navigator.connection && navigator.connection.saveData) return;
+    prefetching = true; // höchstens eine Vorab-Anfrage je Browser, damit die 30 Plätze für echte Klicks frei bleiben
+    var p = splitPath(full);
+    callServer('GET', p.path, withEtag(paramsFromQuery(p.query), pcGet(full)), 2).then(function (res) {
+      if (res.same) pcTouch(full); else if (res.template) pcPut(full, res);
+    }).catch(function () { /* Vorladen ist nur ein Angebot */ }).finally(function () { prefetching = false; });
+  }
+  function onPointToLink(event) {
+    var a = event.target.closest && event.target.closest('a[href^="#/"]');
+    clearTimeout(hoverTimer);
+    if (!a) return;
+    var full;
+    try { full = decodeURI(a.getAttribute('href').slice(1)); } catch (err) { return; }
+    hoverTimer = setTimeout(function () { prefetch(full); }, 80);
+  }
+  document.addEventListener('mouseover', onPointToLink);
+  document.addEventListener('focusin', onPointToLink);
 
   function showFatal(message) {
     var box = document.getElementById('fatal');
@@ -113,13 +296,25 @@
     root.lang = ctx.lang;
     var fn = TEMPLATES[template] || TEMPLATES.notfound;
     var oldMain = app.querySelector('main.sheet');
-    var scroll = opts.keepScroll && oldMain ? oldMain.scrollTop : 0;
+    var scroll = (opts.keepScroll || opts.keepState) && oldMain ? oldMain.scrollTop : 0;
+    // Neuer Stand derselben Seite (nach dem Stand aus dem Speicher): Blättern, Fokus und Eingabe bleiben.
+    var focused = opts.keepState && document.activeElement && document.activeElement.id ? document.activeElement : null;
+    var keep = focused && { id: focused.id, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd };
+    var winScroll = opts.keepState ? window.scrollY : 0;
     app.innerHTML = fn(ctx);
     document.title = (app.querySelector('.appbar-title') || {}).textContent + ' · ' + ctx.app_name;
     applySidebarState();
     var main = app.querySelector('main.sheet');
     if (main) main.scrollTop = scroll;
-    window.scrollTo(0, 0);
+    window.scrollTo(0, winScroll);
+    if (keep) {
+      var again = document.getElementById(keep.id);
+      if (again) {
+        if (typeof keep.value === 'string' && 'value' in again && again.type !== 'hidden') again.value = keep.value;
+        again.focus({ preventScroll: true });
+        try { if (keep.start !== null && keep.start !== undefined) again.setSelectionRange(keep.start, keep.end); } catch (err) { /* nicht jedes Feld */ }
+      }
+    }
     app.querySelectorAll('.msgs').forEach(function (box) { box.scrollTop = box.scrollHeight; });
     drawChart(ctx);
     if (opts.focus) { var f = document.getElementById(opts.focus); if (f) f.focus({ preventScroll: true }); }
@@ -403,6 +598,8 @@
 
   // ------------------------------------------------------------ Start
 
+  // Seiten-Cache gehört einer Person: andere Anmeldung im selben Browser, alles weg.
+  if (read('pc-user') !== (window.VIEWER || '')) { pcClear(); store('pc-user', window.VIEWER || ''); }
   var start = window.START_PATH && window.START_PATH.charAt(0) === '/' ? window.START_PATH : hashPath();
   if (start !== hashPath()) navigate(start); else load('GET', start);
 })();

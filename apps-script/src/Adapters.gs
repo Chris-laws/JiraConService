@@ -37,13 +37,25 @@ function requestJson(method, url, options) {
     req.contentType = 'application/json';
     req.payload = JSON.stringify(options.json);
   }
-  var resp;
-  try {
-    resp = UrlFetchApp.fetch(url, req);
-  } catch (exc) {
-    throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
+  // Lesen wird bei vorübergehenden Fehlern (429, 502–504, Netz) bis zu zweimal wiederholt,
+  // mit wachsender, zufälliger Wartezeit. Schreiben nie, damit nichts doppelt angelegt wird.
+  var retries = options.retries !== undefined ? options.retries : (method === 'GET' ? 2 : 0);
+  var resp, code;
+  for (var attempt = 0; ; attempt++) {
+    var t0 = Date.now();
+    PERF_.fetches++;
+    try {
+      resp = UrlFetchApp.fetch(url, req);
+      code = resp.getResponseCode();
+    } catch (exc) {
+      PERF_.fetchMs += Date.now() - t0;
+      if (attempt < retries) { backoff_(attempt); continue; }
+      throw new ErrorType(method + ' ' + host + ' fehlgeschlagen: ' + safeFetchMessage_(exc));
+    }
+    PERF_.fetchMs += Date.now() - t0;
+    if (attempt < retries && TRANSIENT_CODES_.indexOf(code) >= 0) { backoff_(attempt); continue; }
+    break;
   }
-  var code = resp.getResponseCode();
   if (code < 200 || code >= 300) throw new ErrorType(method + ' ' + host + ' antwortete mit HTTP ' + code);
   try {
     return JSON.parse(resp.getContentText());
@@ -61,6 +73,14 @@ function safeFetchMessage_(exc) {
     .replace(/\b((?:access_)?token|key|api_?key|pat|password|secret|sig)=[^&\s"']*/gi, '$1=…')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer …')
     .slice(0, 300);
+}
+
+var TRANSIENT_CODES_ = [429, 502, 503, 504];
+
+/** Wartezeit vor einer Wiederholung: 0,4 s, 1,2 s … mit ±50 % Zufall gegen gleichzeitige Wiederholungen. */
+function backoff_(attempt) {
+  var base = 400 * Math.pow(3, attempt);
+  Utilities.sleep(Math.round(base * (0.5 + Math.random())));
 }
 
 function bearer_(token, extra) {
@@ -385,9 +405,17 @@ MockDocuments.prototype.documents = function () {
 
 var CACHE_SECONDS_ = 300;
 
+/** Versions-Token je Datenquelle: ein Schreibvorgang setzt ein neues, alte Cache-Stände gelten dann nicht mehr. */
+function cacheVersion_(cache, group) { return cache.get('ver:' + group) || '0'; }
+function bumpCacheVersion_(group) {
+  try { CacheService.getScriptCache().put('ver:' + group, String(Date.now()), 21600); } catch (e) { /* egal */ }
+}
+
 function cachedList_(cacheKey, loader, dateFields) {
   var cache = CacheService.getScriptCache();
+  cacheKey = cacheKey + '@' + cacheVersion_(cache, cacheKey.split(':')[0]);
   var raw = readChunked_(cache, cacheKey);
+  if (raw) PERF_.cacheHits++; else PERF_.cacheMisses++;
   if (raw) {
     try {
       return JSON.parse(raw).map(function (row) {

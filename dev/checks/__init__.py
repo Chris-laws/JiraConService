@@ -23,5 +23,7 @@ CHECKS: tuple[Check, ...] = (
     Check("as-tests", "Apps Script: Seiten, Live-Adapter, Vertex-Header, Bundle aktuell", "alle grün", appscript.tests),
     Check("as-privacy", "Apps Script: Prompts nur nach redact(), Melder bleibt auf dem Server", "0 Befunde", appscript.privacy),
     Check("as-stress", "Apps Script: 500/2.000 Tickets, Cache unter 100 KB je Wert, 4.775 Fuzzing-Aufrufe", "Seite mit Cache < 30 s, kein Absturz, keine Tokens", appscript.stress),
+    Check("as-budget", "Apps Script: Seitengröße, größte Antwort, Laufzeit mit Cache; Budgets nur senken (Ratsche)", "unter budgets.json", appscript.budget),
+    Check("as-load", "Apps Script: Lastsimulation mit 30 gleichzeitigen Ausführungen, Wiederholung, Erlang-B", "300 Personen: p95 ≤ 3 s, ≤ 0,5 % gescheitert", appscript.load),
     Check("as-ui", "Apps Script im Browser: XSS, Kontrast, Schrift, A11y, Layout, Englisch", "0 Befunde außer begründeten Ausnahmen", appscript.ui),
 )  # fmt: skip
