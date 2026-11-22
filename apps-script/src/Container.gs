@@ -46,6 +46,7 @@ function buildContainer(settings) {
     return memo.memoryIndex;
   };
   lazy('index', function () { return c.bq && s.embeddings === 'vertex' ? new BigQueryIndex(c, memoryIndex) : memoryIndex(); });
+  lazy('retriever', function () { return c.bq ? new BigQueryRetriever(c) : new MemoryRetriever(c); });
   lazy('ticketWriter', function () { return new TicketWriter(c.llm); });
   lazy('priorityAdvisor', function () { return new PriorityAdvisor(); });
   lazy('classifier', function () { return new StreamClassifier(c.embedder, c.thresholds); });

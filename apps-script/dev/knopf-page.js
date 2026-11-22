@@ -37,7 +37,7 @@ Er liest nur, er ändert in Confluence nichts. Die Datei legst du in den Drive-O
 <li>Lesezeichenleiste einblenden (Strg+Umschalt+B).</li>
 <li>Diesen Knopf mit der Maus in die Lesezeichenleiste ziehen: <a class="knopf" href="${esc(href)}">Confluence holen</a></li>
 <li>In Confluence eine beliebige Seite öffnen (angemeldet), dann auf das Lesezeichen klicken.</li>
-<li>Bereich bestätigen (vorbelegt: <strong>${esc(space)}</strong>). Oben rechts zählt ein Kasten die Seiten (10.000 Seiten dauern ein paar Minuten, Tab offen lassen). Am Ende lädt der Browser die Datei(en) <code>confluence-${esc(space)}-Datum….json</code> herunter, je 2.500 Seiten eine. Fragt der Browser, ob mehrere Downloads erlaubt sind: erlauben.</li>
+<li>Bereich bestätigen (vorbelegt: <strong>${esc(space)}</strong>). Oben rechts zählt ein Kasten die Seiten (10.000 Seiten dauern ein paar Minuten, Tab offen lassen). Am Ende lädt der Browser die Datei(en) <code>confluence-${esc(space)}-Datum….json</code> herunter, je 1.000 Seiten eine. Fragt der Browser, ob mehrere Downloads erlaubt sind: erlauben.</li>
 <li>Alle Dateien in den Drive-Ordner ziehen. Ältere Dateien dort löschen (sonst bleiben gelöschte Seiten drin; bei doppelten Seiten gilt die neueste Datei).</li>
 </ol>
 

@@ -458,6 +458,8 @@ var TICKET_PROMPT = 'Du bist Assistent im Anforderungsmanagement. Forme die Anfo
   'acceptance_criteria (Liste), affected (betroffene Prozesse/KPI/Maske/Parameter), background, priority,\n' +
   'open_questions (Liste).\nLand: {country}\nAnforderung:\n"""{text}"""';
 
+var TICKET_EXAMPLES = '\nSo sind ähnliche, vorhandene Tickets formuliert. Übernimm nur Stil, Begriffe und Detailtiefe, keine Inhalte:\n"""';
+
 function sentences_(text) {
   return text.split(TW_SENTENCE_).map(function (s) { return s.trim(); }).filter(String);
 }
@@ -491,11 +493,12 @@ function newDraft_(fields) {
 }
 
 function TicketWriter(llm) { this.llm = llm; this.priorities = SETTINGS.priorities; this.def = SETTINGS.default_priority; }
-TicketWriter.prototype.draft = function (text, country) {
+/** examples (optional): Text ähnlicher, vorhandener Tickets als Vorbild für Stil und Aufbau. */
+TicketWriter.prototype.draft = function (text, country, examples) {
   text = String(text).split(/\s+/).filter(String).join(' ');
   if (this.llm.available && text.split(' ').length >= MIN_WORDS) {
     try {
-      return this.fromLlm_(text, country);
+      return this.fromLlm_(text, country, examples);
     } catch (exc) {
       if (!(exc instanceof LlmUnavailable || exc instanceof SyntaxError || exc instanceof TypeError || exc.name === 'ValueError')) throw exc;
       var d = this.offline_(text, country);
@@ -506,8 +509,9 @@ TicketWriter.prototype.draft = function (text, country) {
   return this.offline_(text, country);
 };
 TicketWriter.prototype.priority_ = function (value) { return this.priorities.indexOf(value) >= 0 ? value : this.def; };
-TicketWriter.prototype.fromLlm_ = function (text, country) {
+TicketWriter.prototype.fromLlm_ = function (text, country, examples) {
   var prompt = TICKET_PROMPT.replace('{priorities}', this.priorities.join(', ')).replace('{country}', country).replace('{text}', redact(text));
+  if (examples) prompt += TICKET_EXAMPLES + redact(String(examples)) + '\n"""';
   var data = JSON.parse(this.llm.generate(prompt, true));
   if (!data || typeof data !== 'object' || Array.isArray(data) || !String(data.title || '').trim()) {
     var err = new Error('KI-Antwort hat kein gültiges Ticket'); err.name = 'ValueError'; throw err;

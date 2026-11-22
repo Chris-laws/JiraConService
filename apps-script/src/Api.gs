@@ -81,6 +81,9 @@ function route_(method, path, p) {
   var c = buildContainer();
   var req = { method: method, path: path, params: p, c: c };
   var m;
+  if (method === 'GET' && path === '/abgleich') return matchPage_(req, null);
+  if (method === 'POST' && path === '/abgleich') return matchRun_(req);
+  if (method === 'GET' && path === '/daten') return dataPage_(req);
   if (method === 'GET' && path === '/') return dashboardPage_(req);
   if (method === 'GET' && path === '/tickets') return ticketsPage_(req);
   if (method === 'GET' && path === '/ticket') return ticketForm_(req);
@@ -176,6 +179,52 @@ function block_(fn) {
 function allowedStreams_() { return activeStreams().map(function (s) { return s.id; }); }
 
 // ---------- Seiten ----------
+
+// Schlanke Fassung: Abgleich (Duplikate, ähnliche Tickets, Stream, Ticket-Entwurf) und Datenanalyse. Logik in Rag.gs.
+
+var MATCH_MIN_CHARS_ = 12;
+
+function matchPage_(req, extra) {
+  var ctx = { examples: EXAMPLES.map(function (e) { return { label: e[0], text: e[1] }; }), countries: SETTINGS.countries,
+    form: { text: '', modus: 'pruefen', country: SETTINGS.countries[0], quellen: RAG_SOURCES_ }, result: null, error: null,
+    store: req.c.bq ? 'bigquery' : 'memory' };
+  Object.keys(extra || {}).forEach(function (k) { ctx[k] = extra[k]; });
+  return render_(req, 'abgleich', 'abgleich', ctx);
+}
+
+function matchRun_(req) {
+  var c = req.c, p = req.params;
+  var quellen = all_(p, 'quelle').filter(function (x) { return RAG_SOURCES_.indexOf(x) >= 0; });
+  var form = { text: last_(p, 'text').trim().slice(0, 6000), modus: last_(p, 'modus') === 'wunsch' ? 'wunsch' : 'pruefen',
+    country: SETTINGS.countries.indexOf(last_(p, 'country')) >= 0 ? last_(p, 'country') : SETTINGS.countries[0],
+    quellen: quellen.length ? quellen : RAG_SOURCES_ };
+  if (form.text.length < MATCH_MIN_CHARS_) return matchPage_(req, { form: form, error: 'Bitte beschreibe das Anliegen in einem ganzen Satz.' });
+  var r = block_(function () { return ragAnalyse_(c, form.text, form.modus, { sources: form.quellen, country: form.country }); });
+  return matchPage_(req, { form: form, result: r[0], error: r[1] });
+}
+
+/** Datenanalyse: teuer (mehrere Abfragen), deshalb 30 Minuten im Cache; ?neu=1 rechnet neu. */
+function dataPage_(req) {
+  var c = req.c;
+  var cache = CacheService.getScriptCache();
+  var key = 'eda:' + (c.bq ? 'bq' : 'mem') + ':' + cacheVersion_(cache, 'jira') + ':' + cacheVersion_(cache, 'confluence') + ':' + chunkMarker_(c.settings).length + chunkConfig_(c.settings).chars;
+  var report = null, error = null;
+  if (last_(req.params, 'neu') !== '1') {
+    try { report = JSON.parse(cache.get(key) || 'null'); } catch (e) { report = null; }
+  }
+  if (!report) {
+    var r = block_(function () { return edaReport_(c); });
+    report = r[0]; error = r[1];
+    if (report) { report.at = nowLocal(); try { cache.put(key, JSON.stringify(report), 1800); } catch (e) { /* zu groß: ohne Cache */ } }
+  }
+  var sync = [];
+  if (c.bq) {
+    var st = block_(function () { return syncStatus_(c.bq); });
+    sync = (st[0] || []).map(function (x) { return { source: x.source, ok: x.ok, at: x.last_run ? formatLocal_(x.last_run) : '', note: x.note, rows: x.rows }; });
+    if (st[1] && !error) error = st[1];
+  }
+  return render_(req, 'daten', 'daten', { report: report, error: error, sync: sync, store: c.bq ? 'bigquery' : 'memory' });
+}
 
 function dashboardPage_(req) {
   var c = req.c, p = req.params;

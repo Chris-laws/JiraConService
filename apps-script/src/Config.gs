@@ -126,7 +126,11 @@ var PROPERTY_DEFAULTS = {
   BQ_DATASET: '',                      // optional: eigener BigQuery-Datensatz (z. B. reqalign); schaltet den Abgleich ein
   BQ_PROJECT: '',                      // leer = VERTEX_PROJECT_ID
   BQ_LOCATION: 'EU',
-  CONFLUENCE_EXPORT_FOLDER_ID: ''      // optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word)
+  CONFLUENCE_EXPORT_FOLDER_ID: '',     // optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word)
+  CHUNK_CHARS: '1200',                 // Größe eines Abschnitts (Chunk) in Zeichen; Empfehlung liefert die Seite „Daten“
+  CHUNK_OVERLAP: '150',                // Überlappung, wenn ein langer Abschnitt geteilt wird
+  RERANKER: 'auto',                    // auto = Vertex Ranking API, sonst Gemini, sonst ohne; ranking | gemini | none
+  RANKING_MODEL: 'semantic-ranker-default@latest'
 };
 
 /** Einmal im Editor ausführen: legt alle Script Properties mit Platzhaltern an (vorhandene bleiben). */
@@ -236,6 +240,11 @@ function loadSettings(props) {
     bqProject: prop_(props, 'BQ_PROJECT') || project,
     bqLocation: prop_(props, 'BQ_LOCATION') || 'EU',
     confluenceExportFolderId: prop_(props, 'CONFLUENCE_EXPORT_FOLDER_ID'),
+    chunkChars: prop_(props, 'CHUNK_CHARS') || '1200',
+    chunkOverlap: prop_(props, 'CHUNK_OVERLAP') || '150',
+    reranker: ['auto', 'ranking', 'gemini', 'none'].indexOf(String(prop_(props, 'RERANKER') || 'auto').toLowerCase()) >= 0
+      ? String(prop_(props, 'RERANKER') || 'auto').toLowerCase() : 'auto',
+    rankingModel: /^[\w@.-]{3,80}$/.test(prop_(props, 'RANKING_MODEL') || '') ? prop_(props, 'RANKING_MODEL') : 'semantic-ranker-default@latest',
     userRoles: userRoles
   };
 }

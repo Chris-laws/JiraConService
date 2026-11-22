@@ -3,9 +3,9 @@
  *
  * Warum: Jira und Confluence live abzufragen dauert, und Confluence ist von Google aus nicht erreichbar. Ein
  * Abgleich (Zeitauslöser alle 15 Minuten) liest Jira (nur GET), liest den Confluence-Export aus einem Drive-Ordner,
- * berechnet für neue oder geänderte Texte die Vektoren mit Vertex und schreibt alles in einen EIGENEN Datensatz.
- * Die Seiten lesen dann nur noch aus BigQuery; die Ähnlichkeitssuche rechnet BigQuery über die gespeicherten
- * Vektoren, pro Suche wird nur noch die Anfrage selbst eingebettet.
+ * zerlegt neue oder geänderte Texte in Chunks (Rag.gs), berechnet deren Vektoren mit Vertex und schreibt alles in
+ * einen EIGENEN Datensatz. Die Seiten lesen dann nur noch aus BigQuery; die Suche (Stichwörter + Vektoren) rechnet
+ * BigQuery über die Tabelle chunks, pro Suche wird nur noch die Anfrage selbst eingebettet.
  *
  * Sicherheit:
  *   - Jira und Confluence bleiben nur lesend (assertReadOnly_ in Adapters.gs). Einzige zusätzliche POST-Adresse
@@ -15,17 +15,19 @@
  *   - Daten gehen nur als Parameter in die Abfrage, nie in den SQL-Text.
  *
  * Tabellen im Datensatz:
- *   issues      Jira-Tickets, in_search (Suche/Streams) und in_country (Country Report), Vektor je Ticket
- *   pages       Confluence-Seiten aus dem Export, Vektor je Seite
+ *   issues      Jira-Tickets, in_search (Suche/Streams) und in_country (Country Report)
+ *   pages       Confluence-Seiten aus dem Export
+ *   chunks      Abschnitte der Tickets und Seiten (siehe Rag.gs) mit Wortstämmen und Vektor: darauf läuft die Suche
  *   sync_state  letzter Lauf je Quelle (Zeitpunkt, Ergebnis, Anzahl)
  */
 
 var BQ_HOST_ = 'https://bigquery.googleapis.com/bigquery/v2/projects/';
-var BQ_ROWS_PER_WRITE_ = 200;    // Zeilen je MERGE (mit Vektor und gekürztem Text etwa 2–3 MB, Grenze 10 MB)
-var BQ_EMBED_PER_RUN_ = 2500;    // höchstens so viele neue Vektoren je Lauf (Laufzeitgrenze 6 Minuten)
+var BQ_ROWS_PER_WRITE_ = 200;    // höchstens so viele Zeilen je Schreibanfrage
+var BQ_EMBED_PER_RUN_ = 2500;    // höchstens so viele neue Vektoren (Chunks) je Lauf (Laufzeitgrenze 6 Minuten)
 var BQ_RUN_SECONDS_ = 270;       // danach keine neuen Schreibpakete mehr, Rest im nächsten Lauf
-var BQ_PAGE_CHARS_ = 6000;       // so viel Text je Confluence-Seite wird gespeichert
-var BQ_EMBED_CHARS_ = 2000;      // so viel Text je Ticket/Seite geht ins Embedding
+var BQ_EMBED_CHARS_ = 4500;      // so viel Text je Chunk geht höchstens ins Embedding (Modellgrenze 2.000 Token)
+var BQ_WRITE_CHARS_ = 3500000;   // Zeichen je Schreibanfrage (Grenze 10 MB, Umlaute zählen doppelt)
+var BQ_BACKFILL_DOCS_ = { issues: 400, pages: 120 }; // so viele Tickets/Seiten holt ein Lauf höchstens nach
 var BQ_FULL_EVERY_HOURS_ = 20;   // spätestens so oft ein Vollabgleich (entfernt gelöschte/verschobene Tickets)
 var BQ_OVERLAP_MINUTES_ = 10;    // Überlappung beim Teilabgleich, damit nichts durch die Lücke fällt
 
@@ -139,6 +141,9 @@ BigQueryClient.prototype.ensureSchema = function () {
     'status STRING, reporter STRING, updated TIMESTAMP, created TIMESTAMP, resolved TIMESTAMP, stream STRING, epic STRING, ' +
     'issue_type STRING, url STRING, board_scope STRING, in_search BOOL, in_country BOOL, text_hash STRING, emb_model STRING, ' +
     'embedding ARRAY<FLOAT64>, synced_at TIMESTAMP) CLUSTER BY key');
+  this.query('-- op: schema\nCREATE TABLE IF NOT EXISTS ' + this.t('chunks') + ' (chunk_id STRING NOT NULL, source STRING, doc_id STRING, ' +
+    'chunk_no INT64, heading STRING, text STRING, terms ARRAY<STRING>, n_terms INT64, emb_model STRING, embedding ARRAY<FLOAT64>, ' +
+    'synced_at TIMESTAMP) CLUSTER BY source, doc_id');
   this.query('-- op: schema\nCREATE TABLE IF NOT EXISTS ' + this.t('pages') + ' (id STRING NOT NULL, title STRING, body STRING, ' +
     'space STRING, url STRING, text_hash STRING, emb_model STRING, embedding ARRAY<FLOAT64>, synced_at TIMESTAMP)');
   this.query('-- op: schema\nCREATE TABLE IF NOT EXISTS ' + this.t('sync_state') + ' (source STRING NOT NULL, mark TIMESTAMP, ' +
@@ -172,115 +177,152 @@ function textHash_(text) {
 function issueText_(i) { return i.summary + '. ' + i.description; }
 function pageText_(p) { return p.title + '. ' + p.body; }
 
-/**
- * Schreibt Zeilen per MERGE (Schlüssel keyCol). Vorher: welche Texte sind neu oder geändert? Nur die gehen an Vertex,
- * höchstens report.embedBudget je Lauf (große Bestände wie 10.000 Confluence-Seiten verteilen sich so auf mehrere
- * Läufe). Zeilen ohne neuen Vektor bekommen keinen Fingerabdruck; backfill_ bettet sie in den nächsten Läufen nach.
- * onlyChanged: nur neue/geänderte Zeilen schreiben (Confluence); sonst alle (Jira, wegen Status & Co.).
- * Läuft die Zeit knapp (report.deadline), bleibt der Rest für den nächsten Lauf (report.pending).
- */
-function bqUpsert_(bq, table, keyCol, rows, textOf, embedder, model, runIso, report, onlyChanged) {
-  if (!rows.length) return;
-  var existing = {};
-  for (var g = 0; g < rows.length; g += 5000) {
-    var keys = rows.slice(g, g + 5000).map(function (r) { return r[keyCol]; });
-    bq.query('-- op: existing-' + table + '\nSELECT ' + keyCol + ' AS k, text_hash, emb_model FROM ' + bq.t(table) +
-      ' WHERE ' + keyCol + ' IN UNNEST(JSON_VALUE_ARRAY(@keys))', { keys: JSON.stringify(keys) })
-      .forEach(function (r) { existing[r.k] = r; });
-  }
-  var hashes = {};
-  var changed = rows.filter(function (r) {
-    var h = hashes[r[keyCol]] = textHash_(textOf(r));
-    var e = existing[r[keyCol]];
-    return !e || e.text_hash !== h || (embedder && e.emb_model !== model);
-  });
-  var write = onlyChanged ? changed : rows;
-  var todo = embedder ? changed.slice(0, Math.max(0, report.embedBudget)) : [];
-  if (todo.length) {
-    try {
-      embedRows_(todo, textOf, embedder, model);
-      report.embedded += todo.length;
-      report.embedBudget -= todo.length;
-    } catch (exc) {
-      if (!(exc instanceof LlmUnavailable)) throw exc;
-      report.notes.push('Vektoren fehlen (' + exc.message + '), nächster Lauf versucht es wieder');
-    }
-  }
-  if (embedder && changed.length > todo.length) report.pending = true;
-  var cols = table === 'issues' ? BQ_ISSUE_COLS_ : BQ_PAGE_COLS_;
-  for (var s = 0; s < write.length; s += BQ_ROWS_PER_WRITE_) {
-    if (Date.now() > report.deadline) { report.pending = true; report.notes.push('Zeit knapp, Rest im nächsten Lauf'); break; }
-    var chunk = write.slice(s, s + BQ_ROWS_PER_WRITE_).map(function (r) {
-      var o = {};
-      cols.forEach(function (c) { var v = r[c[0]]; o[c[0]] = v instanceof Date ? v.toISOString() : v === undefined ? null : v; });
-      o.embedding = r.embedding || [];
-      o.emb_model = r.emb_model || null;
-      // Fingerabdruck nur, wenn der Vektor zum Text passt (oder ohne Vertex gar keiner nötig ist).
-      var e = existing[r[keyCol]];
-      var fresh = r.embedding || !embedder || (e && e.text_hash === hashes[r[keyCol]] && e.emb_model === model);
-      o.text_hash = fresh ? hashes[r[keyCol]] : null;
-      return o;
-    });
-    bq.query(bqMergeSql_(bq, table, keyCol, cols), { rows: JSON.stringify(chunk), run: runIso });
-  }
-}
-
-function embedRows_(rows, textOf, embedder, model) {
-  var vecs = embedder.embed(rows.map(function (r) { return textOf(r).slice(0, BQ_EMBED_CHARS_); }));
-  rows.forEach(function (r, n) { r.embedding = vecs[n].map(function (x) { return Math.round(x * 1e5) / 1e5; }); r.emb_model = model; });
-}
-
-/** Zeilen ohne passenden Vektor (Rest aus früheren Läufen) nachträglich einbetten, im Rahmen des Budgets. */
-function backfill_(bq, embedder, model, report) {
-  if (!embedder) return;
-  [['issues', 'key', "CONCAT(IFNULL(summary, ''), '. ', IFNULL(description, ''))"], ['pages', 'id', "CONCAT(IFNULL(title, ''), '. ', IFNULL(body, ''))"]]
-    .forEach(function (t) {
-      if (report.embedBudget <= 0 || Date.now() > report.deadline) return;
-      // Voller Text (wie beim Abgleich), damit der Fingerabdruck derselbe ist und nichts doppelt eingebettet wird.
-      var rows = bq.query('-- op: backfill-' + t[0] + '\nSELECT ' + t[1] + ' AS k, ' + t[2] + ' AS text FROM ' + bq.t(t[0]) +
-        ' WHERE text_hash IS NULL OR emb_model IS NULL OR emb_model != @model LIMIT @n', { model: model, n: report.embedBudget });
-      if (!rows.length) return;
-      try {
-        embedRows_(rows, function (r) { return r.text || ' '; }, embedder, model);
-      } catch (exc) {
-        if (!(exc instanceof LlmUnavailable)) throw exc;
-        report.notes.push('Nachträgliches Einbetten: ' + exc.message);
-        return;
-      }
-      report.embedded += rows.length;
-      report.embedBudget -= rows.length;
-      for (var s = 0; s < rows.length; s += BQ_ROWS_PER_WRITE_) {
-        var chunk = rows.slice(s, s + BQ_ROWS_PER_WRITE_).map(function (r) {
-          return { k: r.k, text_hash: textHash_(r.text), emb_model: model, embedding: r.embedding };
-        });
-        bq.query('-- op: embed-' + t[0] + '\nMERGE ' + bq.t(t[0]) + ' T USING (SELECT JSON_VALUE(r, \'$.k\') AS k, ' +
-          "JSON_VALUE(r, '$.emb_model') AS emb_model, JSON_VALUE(r, '$.text_hash') AS text_hash, " +
-          "ARRAY(SELECT CAST(x AS FLOAT64) FROM UNNEST(JSON_VALUE_ARRAY(r, '$.embedding')) AS x WITH OFFSET o ORDER BY o) AS embedding " +
-          'FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r) S ON T.' + t[1] + ' = S.k ' +
-          'WHEN MATCHED THEN UPDATE SET embedding = S.embedding, emb_model = S.emb_model, text_hash = S.text_hash',
-        { rows: JSON.stringify(chunk) });
-      }
-    });
-}
-
 var BQ_ISSUE_COLS_ = [['key', 'S'], ['summary', 'S'], ['description', 'S'], ['status', 'S'], ['reporter', 'S'], ['updated', 'T'],
   ['created', 'T'], ['resolved', 'T'], ['stream', 'S'], ['epic', 'S'], ['issue_type', 'S'], ['url', 'S'], ['board_scope', 'S'],
   ['in_search', 'B'], ['in_country', 'B']];
 var BQ_PAGE_COLS_ = [['id', 'S'], ['title', 'S'], ['body', 'S'], ['space', 'S'], ['url', 'S']];
+
+function bqTable_(table) {
+  return table === 'issues'
+    ? { name: 'issues', source: 'jira', key: 'key', title: 'summary', body: 'description', cols: BQ_ISSUE_COLS_, textOf: issueText_ }
+    : { name: 'pages', source: 'confluence', key: 'id', title: 'title', body: 'body', cols: BQ_PAGE_COLS_, textOf: pageText_ };
+}
+
+/** Zeilen in Pakete teilen, die unter der Größengrenze einer Anfrage bleiben. */
+function bqBatches_(rows) {
+  var out = [], batch = [], size = 0;
+  rows.forEach(function (r) {
+    var n = JSON.stringify(r).length;
+    if (batch.length && (size + n > BQ_WRITE_CHARS_ || batch.length >= BQ_ROWS_PER_WRITE_)) { out.push(batch); batch = []; size = 0; }
+    batch.push(r); size += n;
+  });
+  if (batch.length) out.push(batch);
+  return out;
+}
+
+/**
+ * Zerlegt Tickets/Seiten in Chunks (Rag.gs), bettet sie mit Vertex ein und schreibt sie in die Tabelle chunks.
+ * docs: [{k, title, body}]. Höchstens report.embedBudget neue Vektoren je Lauf und nur bis report.deadline; was
+ * nicht mehr drankommt, bleibt für den nächsten Lauf. Liefert {k: true} für alles, was fertig geschrieben ist.
+ */
+function writeChunks_(bq, t, docs, s, embedder, runIso, report) {
+  var cfg = chunkConfig_(s), taken = [], texts = [];
+  for (var d = 0; d < docs.length; d++) {
+    var chunks = chunkDoc_({ source: t.source, title: docs[d].title, body: docs[d].body }, cfg);
+    if (embedder && chunks.length > report.embedBudget) break;
+    if (embedder) report.embedBudget -= chunks.length;
+    taken.push({ k: docs[d].k, chunks: chunks });
+    chunks.forEach(function (ch) { texts.push(ch.embed_text.slice(0, BQ_EMBED_CHARS_)); });
+  }
+  var vecs = null;
+  if (embedder && texts.length) {
+    try {
+      vecs = embedder.embed(texts);
+      report.embedded += texts.length;
+    } catch (exc) {
+      if (!(exc instanceof LlmUnavailable)) throw exc;
+      report.notes.push('Vektoren fehlen (' + exc.message + '), nächster Lauf versucht es wieder');
+      return {};
+    }
+  }
+  var n = 0, done = {};
+  var groups = bqBatches_(taken.map(function (doc) {
+    return { k: doc.k, rows: doc.chunks.map(function (ch) {
+      var terms = termsOf_(ch.embed_text), vec = vecs ? vecs[n] : null;
+      n += 1;
+      return { chunk_id: t.source + ':' + doc.k + '#' + ch.chunk_no, source: t.source, doc_id: doc.k, chunk_no: ch.chunk_no, heading: ch.heading,
+        text: ch.text, terms: terms, n_terms: terms.length, emb_model: vec ? s.vertexEmbeddingModel : null,
+        embedding: vec ? vec.map(function (x) { return Math.round(x * 1e5) / 1e5; }) : [] };
+    }) };
+  }));
+  for (var g = 0; g < groups.length; g++) {
+    if (Date.now() > report.deadline) { report.notes.push('Zeit knapp, Rest im nächsten Lauf'); break; }
+    var rows = [];
+    groups[g].forEach(function (doc) { rows = rows.concat(doc.rows); });
+    // Erst die alten Chunks dieser Tickets/Seiten weg, dann die neuen hinein.
+    bq.query('-- op: chunks-delete\nDELETE FROM ' + bq.t('chunks') + ' WHERE source = @source AND doc_id IN UNNEST(JSON_VALUE_ARRAY(@ids))',
+      { source: t.source, ids: JSON.stringify(groups[g].map(function (doc) { return doc.k; })) });
+    bq.query('-- op: chunks-insert\nINSERT INTO ' + bq.t('chunks') + ' (chunk_id, source, doc_id, chunk_no, heading, text, terms, n_terms, emb_model, embedding, synced_at) ' +
+      "SELECT JSON_VALUE(r, '$.chunk_id'), JSON_VALUE(r, '$.source'), JSON_VALUE(r, '$.doc_id'), CAST(JSON_VALUE(r, '$.chunk_no') AS INT64), " +
+      "JSON_VALUE(r, '$.heading'), JSON_VALUE(r, '$.text'), JSON_VALUE_ARRAY(r, '$.terms'), CAST(JSON_VALUE(r, '$.n_terms') AS INT64), " +
+      "JSON_VALUE(r, '$.emb_model'), ARRAY(SELECT CAST(x AS FLOAT64) FROM UNNEST(JSON_VALUE_ARRAY(r, '$.embedding')) AS x WITH OFFSET o ORDER BY o), " +
+      'TIMESTAMP(@run) FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r', { rows: JSON.stringify(rows), run: runIso });
+    groups[g].forEach(function (doc) { done[doc.k] = true; });
+  }
+  return done;
+}
+
+/**
+ * Schreibt Zeilen per MERGE. Vorher: welche Texte sind neu oder geändert (Fingerabdruck), oder mit einer anderen
+ * Chunk-Einstellung zerlegt (Kennung in emb_model)? Nur die werden neu zerlegt und eingebettet. Zeilen, die in diesem
+ * Lauf nicht mehr drankommen, bekommen keinen Fingerabdruck; backfill_ holt sie in den nächsten Läufen nach.
+ * onlyChanged: nur neue/geänderte Zeilen schreiben (Confluence); sonst alle (Jira, wegen Status & Co.).
+ */
+function bqUpsert_(bq, table, rows, s, embedder, runIso, report, onlyChanged) {
+  if (!rows.length) return;
+  var t = bqTable_(table), marker = chunkMarker_(s);
+  var existing = {};
+  for (var g = 0; g < rows.length; g += 5000) {
+    var keys = rows.slice(g, g + 5000).map(function (r) { return r[t.key]; });
+    bq.query('-- op: existing-' + table + '\nSELECT ' + t.key + ' AS k, text_hash, emb_model FROM ' + bq.t(table) +
+      ' WHERE ' + t.key + ' IN UNNEST(JSON_VALUE_ARRAY(@keys))', { keys: JSON.stringify(keys) })
+      .forEach(function (r) { existing[r.k] = r; });
+  }
+  var hashes = {};
+  var changed = rows.filter(function (r) {
+    var h = hashes[r[t.key]] = textHash_(t.textOf(r));
+    var e = existing[r[t.key]];
+    return !e || e.text_hash !== h || e.emb_model !== marker;
+  });
+  var done = changed.length ? writeChunks_(bq, t, changed.map(function (r) { return { k: r[t.key], title: r[t.title], body: r[t.body] }; }),
+    s, embedder, runIso, report) : {};
+  if (Object.keys(done).length < changed.length) report.pending = true;
+  var write = (onlyChanged ? changed : rows).map(function (r) {
+    var o = {}, k = r[t.key], e = existing[k];
+    t.cols.forEach(function (c) { var v = r[c[0]]; o[c[0]] = v instanceof Date ? v.toISOString() : v === undefined ? null : v; });
+    // Fingerabdruck nur, wenn die Chunks zum Text passen.
+    o.text_hash = done[k] || (e && e.text_hash === hashes[k] && e.emb_model === marker) ? hashes[k] : null;
+    o.emb_model = done[k] ? marker : null;
+    return o;
+  });
+  var batches = bqBatches_(write);
+  for (var b = 0; b < batches.length; b++) {
+    if (Date.now() > report.deadline) { report.pending = true; report.notes.push('Zeit knapp, Rest im nächsten Lauf'); break; }
+    bq.query(bqMergeSql_(bq, table, t.key, t.cols), { rows: JSON.stringify(batches[b]), run: runIso });
+  }
+}
+
+/** Tickets/Seiten ohne passende Chunks (Rest aus früheren Läufen, neue Chunk-Einstellung) nachträglich zerlegen. */
+function backfill_(bq, s, embedder, runIso, report) {
+  var marker = chunkMarker_(s);
+  ['issues', 'pages'].forEach(function (table) {
+    if ((embedder && report.embedBudget <= 0) || Date.now() > report.deadline) return;
+    var t = bqTable_(table);
+    // Voller Text (wie beim Abgleich), damit der Fingerabdruck derselbe ist und nichts doppelt eingebettet wird.
+    var rows = bq.query('-- op: backfill-' + table + '\nSELECT ' + t.key + ' AS k, IFNULL(' + t.title + ", '') AS title, IFNULL(" + t.body + ", '') AS body FROM " +
+      bq.t(table) + ' WHERE text_hash IS NULL OR emb_model IS NULL OR emb_model != @marker LIMIT @n', { marker: marker, n: BQ_BACKFILL_DOCS_[table] });
+    if (!rows.length) return;
+    var done = writeChunks_(bq, t, rows, s, embedder, runIso, report);
+    var ok = rows.filter(function (r) { return done[r.k]; }).map(function (r) { return { k: r.k, text_hash: textHash_(r.title + '. ' + r.body) }; });
+    if (ok.length < rows.length || rows.length >= BQ_BACKFILL_DOCS_[table]) report.pending = true;
+    bqBatches_(ok).forEach(function (batch) {
+      bq.query('-- op: mark-' + table + '\nMERGE ' + bq.t(table) + " T USING (SELECT JSON_VALUE(r, '$.k') AS k, JSON_VALUE(r, '$.text_hash') AS text_hash " +
+        'FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r) S ON T.' + t.key + ' = S.k ' +
+        'WHEN MATCHED THEN UPDATE SET text_hash = S.text_hash, emb_model = @marker', { rows: JSON.stringify(batch), marker: marker });
+    });
+  });
+}
 
 function bqMergeSql_(bq, table, keyCol, cols) {
   var sel = cols.map(function (c) {
     var j = "JSON_VALUE(r, '$." + c[0] + "')";
     return (c[1] === 'T' ? 'TIMESTAMP(' + j + ')' : c[1] === 'B' ? 'CAST(' + j + ' AS BOOL)' : j) + ' AS ' + c[0];
   });
-  sel.push("JSON_VALUE(r, '$.text_hash') AS text_hash", "JSON_VALUE(r, '$.emb_model') AS emb_model",
-    "ARRAY(SELECT CAST(x AS FLOAT64) FROM UNNEST(JSON_VALUE_ARRAY(r, '$.embedding')) AS x WITH OFFSET o ORDER BY o) AS embedding");
-  var has = 'ARRAY_LENGTH(S.embedding) > 0';
+  sel.push("JSON_VALUE(r, '$.text_hash') AS text_hash", "JSON_VALUE(r, '$.emb_model') AS emb_model");
   var set = cols.filter(function (c) { return c[0] !== keyCol; }).map(function (c) { return c[0] + ' = S.' + c[0]; });
-  set.push('text_hash = S.text_hash', 'emb_model = IF(' + has + ', S.emb_model, T.emb_model)',
-    'embedding = IF(' + has + ', S.embedding, T.embedding)', 'synced_at = TIMESTAMP(@run)');
-  var names = cols.map(function (c) { return c[0]; }).concat(['text_hash', 'emb_model', 'embedding', 'synced_at']);
-  var vals = cols.map(function (c) { return 'S.' + c[0]; }).concat(['S.text_hash', 'S.emb_model', 'S.embedding', 'TIMESTAMP(@run)']);
+  set.push('text_hash = S.text_hash', 'emb_model = IFNULL(S.emb_model, T.emb_model)', 'synced_at = TIMESTAMP(@run)');
+  var names = cols.map(function (c) { return c[0]; }).concat(['text_hash', 'emb_model', 'synced_at']);
+  var vals = cols.map(function (c) { return 'S.' + c[0]; }).concat(['S.text_hash', 'S.emb_model', 'TIMESTAMP(@run)']);
   return '-- op: merge-' + table + '\nMERGE ' + bq.t(table) + ' T USING (SELECT ' + sel.join(', ') +
     ' FROM UNNEST(JSON_QUERY_ARRAY(@rows)) AS r) S ON T.' + keyCol + ' = S.' + keyCol +
     ' WHEN MATCHED THEN UPDATE SET ' + set.join(', ') +
@@ -309,16 +351,22 @@ function syncJira_(c, bq, st, full, runAt, report) {
   }
   var rows = jiraSyncRows_(reader);
   var runIso = runAt.toISOString();
-  bqUpsert_(bq, 'issues', 'key', rows, issueText_, syncEmbedder_(c), c.settings.vertexEmbeddingModel, runIso, report);
+  bqUpsert_(bq, 'issues', rows, c.settings, syncEmbedder_(c), runIso, report);
   if (full) {
     // Was Jira nicht mehr liefert (gelöscht, verschoben), fliegt raus. Über die Keys, nicht über die Zeit: so bleibt
     // auch bei einem abgebrochenen Lauf nichts Gültiges auf der Strecke.
     bq.query('-- op: prune-issues\nDELETE FROM ' + bq.t('issues') + ' WHERE key NOT IN UNNEST(JSON_VALUE_ARRAY(@keys))',
       { keys: JSON.stringify(rows.map(function (r) { return r.key; })) });
+    pruneChunks_(bq, 'jira', rows.map(function (r) { return r.key; }));
   }
   report.jira = rows.length;
   return { mark: runAt, last_run: runAt, last_full: full ? runAt : prev.last_full, ok: true,
     note: (full ? 'Vollabgleich' : 'Teilabgleich') + ': ' + rows.length + ' Tickets', row_count: rows.length };
+}
+
+function pruneChunks_(bq, source, keys) {
+  bq.query('-- op: chunks-prune\nDELETE FROM ' + bq.t('chunks') + ' WHERE source = @source AND doc_id NOT IN UNNEST(JSON_VALUE_ARRAY(@keys))',
+    { source: source, keys: JSON.stringify(keys) });
 }
 
 /** Für den Abgleich nur Vertex (die Vektoren müssen zur Suche passen); ohne Vertex wird ohne Vektoren gespeichert. */
@@ -347,7 +395,7 @@ function readConfluenceExport_(folderId, baseUrl) {
   files = sortBy(files.map(function (f) { return { f: f, at: f.getLastUpdated() }; }), function (x) { return -x.at.getTime(); });
   var pages = [], seen = {}, updated = null;
   var push = function (p) {
-    if (p && p.body && !seen[p.id]) { seen[p.id] = true; p.body = p.body.slice(0, BQ_PAGE_CHARS_); pages.push(p); }
+    if (p && p.body && !seen[p.id]) { seen[p.id] = true; p.body = p.body.slice(0, RAG_PAGE_CHARS_); pages.push(p); }
   };
   var add = function (name, html) { push(parseConfluenceHtml_(name, html, baseUrl)); };
   files.forEach(function (x) {
@@ -381,7 +429,7 @@ function confluenceJsonPages_(text, name) {
   if (!data || data.format !== 'confluence-pages' || !Array.isArray(data.pages)) return [];
   var safeUrl = function (u) { return /^https:\/\//i.test(String(u || '')) ? String(u) : ''; };
   return data.pages.map(function (p) {
-    return { id: String(p.id || ''), title: String(p.title || ''), body: stripHtml(String(p.body || '').replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')),
+    return { id: String(p.id || ''), title: String(p.title || ''), body: htmlToText_(p.body || ''),
       space: String(p.space || data.space || ''), url: safeUrl(p.url) };
   }).filter(function (p) { return p.id && p.title; });
 }
@@ -431,8 +479,7 @@ function parseConfluenceHtml_(fileName, html, baseUrl) {
     var b = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);
     if (b) bodyHtml = b[1];
   }
-  bodyHtml = bodyHtml.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ');
-  var body = stripHtml(bodyHtml);
+  var body = htmlToText_(bodyHtml);
   if (!title) title = base.replace(/_\d+$/, '').replace(/[-_]+/g, ' ');
   var url = idm && baseUrl ? baseUrl.replace(/\/+$/, '') + '/pages/viewpage.action?pageId=' + id : '';
   return { id: id, title: title, body: body, space: space, url: url };
@@ -454,10 +501,11 @@ function syncConfluence_(c, bq, st, full, runAt, report) {
     return null; // nichts Neues im Ordner
   }
   var runIso = runAt.toISOString();
-  bqUpsert_(bq, 'pages', 'id', exp.pages, pageText_, syncEmbedder_(c), s.vertexEmbeddingModel, runIso, report, true);
+  bqUpsert_(bq, 'pages', exp.pages, s, syncEmbedder_(c), runIso, report, true);
   // Der Ordner ist immer der ganze Stand: Seiten, die nicht mehr drin sind, fliegen raus.
   bq.query('-- op: prune-pages\nDELETE FROM ' + bq.t('pages') + ' WHERE id NOT IN UNNEST(JSON_VALUE_ARRAY(@keys))',
     { keys: JSON.stringify(exp.pages.map(function (p) { return p.id; })) });
+  pruneChunks_(bq, 'confluence', exp.pages.map(function (p) { return p.id; }));
   report.confluence = exp.pages.length;
   // Nicht fertig geworden (Zeit): Ordner beim nächsten Lauf erneut lesen; schon Geschriebenes wird übersprungen.
   return { mark: report.pending ? prev.mark : exp.updated || runAt, last_run: runAt, last_full: runAt, ok: true,
@@ -520,12 +568,12 @@ function runSync_(c, forceFull) {
       }
     });
     try {
-      backfill_(bq, syncEmbedder_(c), c.settings.vertexEmbeddingModel, report);
+      backfill_(bq, c.settings, syncEmbedder_(c), runAt.toISOString(), report);
     } catch (exc) {
       if (exc instanceof WriteDisabled) throw exc;
       report.notes.push('Nachbetten: ' + safeFetchMessage_(exc));
     }
-    if (report.pending) report.notes.push('Noch nicht alles eingebettet, geht im nächsten Lauf weiter');
+    if (report.pending) report.notes.push('Noch nicht alles zerlegt und eingebettet, geht im nächsten Lauf weiter');
     // Hat sich etwas geändert: alte Listen im Cache verwerfen. Danach den Cache füllen (falls leer), damit die erste
     // Person nach dem Abgleich nicht wartet.
     if (full || report.jira) bumpCacheVersion_('jira');
@@ -541,7 +589,7 @@ function runSync_(c, forceFull) {
 
 function syncSummary_(r) {
   return 'Abgleich ' + (r.ok ? 'fertig' : 'mit Fehlern') + ': Jira ' + r.jira + ' Tickets, Confluence ' + r.confluence + ' Seiten' +
-    ', neu eingebettet ' + r.embedded + (r.notes.length ? '. Hinweise: ' + r.notes.join(' | ') : '');
+    ', neu eingebettet ' + r.embedded + ' Abschnitte' + (r.notes.length ? '. Hinweise: ' + r.notes.join(' | ') : '');
 }
 
 // ---------- Lesen aus BigQuery (die Seiten der App) ----------
@@ -571,43 +619,38 @@ BigQueryJira.prototype.issuesByReporter = function (email) { return this.live.is
 
 function BigQueryConfluence(bq) { this.bq = bq; }
 BigQueryConfluence.prototype.pages = function () {
-  return this.bq.query('-- op: pages\nSELECT id, title, body, space, url FROM ' + this.bq.t('pages') + ' ORDER BY title').map(function (r) {
+  return this.bq.query('-- op: pages\nSELECT id, title, SUBSTR(body, 1, 6000) AS body, space, url FROM ' + this.bq.t('pages') + ' ORDER BY title').map(function (r) {
     return { id: r.id, title: r.title || '', body: r.body || '', space: r.space || '', url: r.url || '' };
   });
 };
 
 /**
- * Ähnlichkeitssuche in BigQuery über die gespeicherten Vektoren: nur die Anfrage wird eingebettet (ein Vertex-Aufruf),
- * den Rest rechnet BigQuery. Dokumente aus dem Drive-Ordner (wenige) kommen aus dem Speicher dazu.
+ * Ähnlichkeitssuche für die älteren Seiten (Wissen, Ticketprüfung): nutzt dieselbe Suche über die Chunks (Rag.gs).
+ * Nur die Anfrage wird eingebettet (ein Vertex-Aufruf), den Rest rechnet BigQuery. Dokumente aus dem Drive-Ordner (wenige) kommen aus dem Speicher dazu.
  * Ohne Vertex (oder wenn BigQuery ausfällt) läuft die bisherige Suche im Speicher.
  */
 function BigQueryIndex(c, fallback) { this.c = c; this.fallback = fallback; this.docs = null; }
 BigQueryIndex.prototype.search = function (text, k, minScore) {
   k = k || 5; minScore = minScore || 0;
   if (!String(text).trim()) return [];
-  var c = this.c;
-  var q = c.embedder.embed([text])[0];
-  if (c.embedder.name !== 'vertex') return this.fallback().search(text, k, minScore);
-  var hits;
+  var c = this.c, found;
   try {
-    hits = c.bq.query('-- op: vector-search\nSELECT source, id, title, url, snippet, payload, 1 - ML.DISTANCE(embedding, @q, \'COSINE\') AS score FROM (' +
-      "SELECT 'jira' AS source, key AS id, CONCAT(key, ': ', IFNULL(summary, '')) AS title, url, " +
-      "SUBSTR(CONCAT(IFNULL(summary, ''), '. ', IFNULL(description, '')), 1, @len) AS snippet, " +
-      'TO_JSON_STRING(STRUCT(status, stream, epic)) AS payload, embedding FROM ' + c.bq.t('issues') +
-      ' WHERE in_search AND emb_model = @model AND ARRAY_LENGTH(embedding) = @dim UNION ALL ' +
-      "SELECT 'confluence', id, title, url, SUBSTR(CONCAT(IFNULL(title, ''), '. ', IFNULL(body, '')), 1, @len), " +
-      'TO_JSON_STRING(STRUCT(space)), embedding FROM ' + c.bq.t('pages') +
-      ' WHERE emb_model = @model AND ARRAY_LENGTH(embedding) = @dim) ORDER BY score DESC LIMIT @k',
-    { q: q, model: c.settings.vertexEmbeddingModel, dim: q.length, len: SNIPPET_LEN, k: k }).map(function (r) {
-      var payload = {};
-      try { payload = JSON.parse(r.payload || '{}'); } catch (e) { payload = {}; }
-      return { id: r.id, score: pyRound(r.score, 4), title: r.title || '', url: r.url || '', source: r.source, snippet: r.snippet || '', payload: payload };
-    });
+    found = c.retriever.search(text, {});
   } catch (exc) {
     if (!(exc instanceof SourceUnavailable)) throw exc;
     c.notices.push('BigQuery ist gerade nicht erreichbar (' + exc.message + '). Gesucht wird direkt in Jira.');
     return this.fallback().search(text, k, minScore);
   }
+  if (!found.vector) return this.fallback().search(text, k, minScore);
+  var byDoc = {}, hits = [];
+  found.rows.forEach(function (r) {
+    if (r.vec === null || r.vec === undefined) return;
+    var id = r.source + ':' + r.doc_id;
+    if (byDoc[id]) { if (r.vec > byDoc[id].score) { byDoc[id].score = r.vec; byDoc[id].snippet = r.text.slice(0, SNIPPET_LEN); } return; }
+    hits.push(byDoc[id] = { id: r.doc_id, score: r.vec, title: r.source === 'jira' ? r.doc_id + ': ' + r.title : r.title, url: r.url, source: r.source,
+      snippet: r.text.slice(0, SNIPPET_LEN), payload: r.source === 'jira' ? { status: r.status, stream: r.stream, epic: r.epic } : { space: r.space } });
+  });
+  hits.forEach(function (h) { h.score = pyRound(h.score, 4); });
   hits = hits.concat(this.docIndex_().search(text, k, minScore));
   return sortBy(hits.filter(function (h) { return h.score >= minScore; }), function (h) { return -h.score; }).slice(0, k);
 };

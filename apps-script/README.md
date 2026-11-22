@@ -107,6 +107,9 @@ besten Textstellen der Quellen.
 | `BQ_PROJECT`, `BQ_LOCATION` | Projekt (leer = `VERTEX_PROJECT_ID`) und Ort (Standard `EU`) des Datensatzes |
 | `CONFLUENCE_CLIENTLESS` | Optional: `1` oder `3`, wenn Confluence hinter einem F5-Anmeldegateway steht und `testConfluence` im Editor das empfiehlt |
 | `CONFLUENCE_EXPORT_FOLDER_ID` | Optional: Drive-Ordner mit dem Confluence-Export (ZIP, HTML oder Word) |
+| `CHUNK_CHARS`, `CHUNK_OVERLAP` | Größe eines Chunks in Zeichen und Überlappung (Standard 1200 / 150). Die Seite „Daten“ empfiehlt Werte für die eigenen Daten |
+| `RERANKER` | `auto` (Vertex Ranking API, sonst Gemini, sonst ohne), `ranking`, `gemini` oder `none` |
+| `RANKING_MODEL` | Modell der Ranking API (Standard `semantic-ranker-default@latest`) |
 | `LLM_DAILY_LIMIT` | KI-Aufrufe je Person und Tag (Standard 200, `0` = kein Limit). Danach rechnet die App mit Regeln weiter und zeigt einen Hinweis |
 
 Werte, die mit `PLATZHALTER` beginnen, gelten als nicht gesetzt. Streams, Epics, Prioritäten, Lebenszyklus und
@@ -150,13 +153,43 @@ Einrichten:
 
 „Meine Tickets“ fragt weiter direkt in Jira (immer aktuell, kleine Abfrage je Person).
 
+## Abgleich: Duplikate, ähnliche Tickets, Stream, Ticket-Text
+
+Die Oberfläche hat zwei Seiten. **Abgleich** vergleicht ein Anliegen mit allen Jira-Tickets und Confluence-Seiten:
+„Nur prüfen“ zeigt Duplikate und Ähnliches, „Wunsch an International“ zeigt zusätzlich, in welchen Stream und welches
+Epic der Wunsch gehört (abgeleitet aus den ähnlichsten vorhandenen Tickets), und schreibt den Ticket-Text im Aufbau
+der Vorgabemaske, formuliert nach dem Vorbild ähnlicher Tickets. **Daten** wertet die eigenen Daten aus und empfiehlt
+die Chunk-Größe.
+
+So läuft die Suche (`Rag.gs`):
+
+1. **Chunking:** Texte werden an Überschriften getrennt (Jira `h1.` bis `h6.`, Confluence-Überschriften), kleine
+   Abschnitte zusammengelegt, lange an Absätzen und Sätzen geteilt, mit Überlappung. Jeder Chunk trägt Titel und
+   Überschrift im Text.
+2. **Hybrid-Suche:** Stichwörter (BM25 über Wortstämme) und Bedeutung (Vektoren von Vertex), zusammengeführt mit
+   Reciprocal Rank Fusion. Mit BigQuery ist das eine Abfrage über die Tabelle `chunks`.
+3. **Reranker:** Vertex Ranking API ordnet die besten 40 Abschnitte neu. Ist sie nicht erreichbar, springt Gemini
+   ein, sonst bleibt die Reihenfolge der Suche. Im Cloud-Projekt nötig: Discovery Engine API aktiviert, Rolle
+   „Discovery Engine Viewer“.
+4. **Einstufung:** Duplikat, sehr ähnlich, verwandt (Schwellen in `SETTINGS.thresholds`). Fällt Vertex aus, sucht
+   die App nur über Stichwörter und nennt dann nichts „Duplikat“.
+
+Im Editor: `datenanalyse()` schreibt die Auswertung ins Protokoll, `sucheTesten()` macht eine Probesuche und zeigt,
+ob Stichwörter, Vektoren und Reranker arbeiten. Nach einer neuen Chunk-Größe `abgleichVoll()` ausführen; große
+Bestände verteilen sich auf mehrere Läufe (2.500 Chunks je Lauf).
+
+Die früheren Seiten (Übersicht, Tickets, Bugs, Wissen …) sind aus der Oberfläche entfernt; ihr Server-Code bleibt
+vorerst, damit sie sich wieder einschalten lassen.
+
 ## Nur lesen
 
 Diese Fassung schreibt nirgends hin. Abgesichert in mehreren Schichten:
 
 1. **Sperre im Code** (`assertReadOnly_` in `Adapters.gs`): Jeder HTTP-Aufruf der App läuft hindurch. An Jira,
    Confluence, ServiceNow und jede andere Adresse geht nur `GET`. Einzige Ausnahme ist Vertex AI
-   (`*aiplatform.googleapis.com`), das Anfragen per `POST` erwartet. Keine Skripteigenschaft kann das lockern.
+   (`*aiplatform.googleapis.com`), das Anfragen per `POST` erwartet, dazu der Reranker von Vertex (genau die
+   Methode `rank` der Ranking API, sie bewertet Texte und ändert nichts) und der Abfrage-Endpunkt von BigQuery für den
+   eigenen Datensatz. Keine Skripteigenschaft kann das lockern.
 2. **Kein Code zum Anlegen:** Der frühere Jira-Writer ist entfernt; „Einreichen“ bleibt gesperrt, das Ticket wird
    als Text kopiert und von Hand in Jira eingefügt.
 3. **Berechtigungen:** Drive nur lesend (`drive.readonly`), keine Gmail-, Kalender- oder Tabellen-Rechte.

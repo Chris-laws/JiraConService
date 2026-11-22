@@ -1,608 +1,443 @@
 <script>
-// Seitenwechsel, Formulare und Kleinigkeiten (Hell/Dunkel, Menü, Dialoge, Kopieren, Diagramm).
-// Seiten heißen wie in der bisherigen Web-App (#/tickets?scope=…). Jeder Wechsel fragt apiRequest() in Api.gs.
-
+// Oberfläche der schlanken Fassung: zwei Seiten (Abgleich, Daten). Der Server liefert nur Daten (apiRequest in Api.gs),
+// gezeichnet wird hier. Alles, was aus Jira, Confluence oder einer Eingabe stammt, läuft durch esc().
 (function () {
-  var root = document.documentElement;
-  var app = document.getElementById('app');
-  var progress = document.getElementById('route-progress');
-  var suppressHash = null;
-  var current = { path: '/', query: '' };
+  'use strict';
 
-  function store(key, value) { try { localStorage.setItem(key, value); } catch (err) { /* privat: egal */ } }
-  function read(key) { try { return localStorage.getItem(key); } catch (err) { return null; } }
+  var TEXT = {
+    de: {
+      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', recent: 'Zuletzt geprüft',
+      recent_empty: 'Deine letzten Anfragen stehen hier, nur in diesem Browser.', lang: 'Sprache', theme_dark: 'Dunkle Ansicht', theme_light: 'Helle Ansicht',
+      h_match: 'Gibt es das schon?', lede: 'Beschreibe dein Anliegen in eigenen Worten. Es wird mit allen Jira-Tickets und Confluence-Seiten verglichen.',
+      mode: 'Was möchtest du tun?', mode_check: 'Nur prüfen', mode_wish: 'Wunsch an International',
+      mode_check_hint: 'Zeigt, ob es das Thema schon gibt.', mode_wish_hint: 'Zeigt zusätzlich, wohin der Wunsch gehört, und schreibt den Ticket-Text vor.',
+      text_label: 'Dein Anliegen', placeholder: 'z. B. Der Bestellvorschlag soll Feiertage je Land berücksichtigen, damit vor Feiertagen nicht zu wenig bestellt wird.',
+      sources: 'Quellen', country: 'Land', run: 'Abgleichen', running: 'Abgleich läuft', try: 'Zum Ausprobieren',
+      step1: 'Suche nach Stichwörtern und nach Bedeutung …', step2: 'Reranker ordnet die besten Stellen …', step3: 'Ergebnis wird zusammengestellt …',
+      hits: 'Treffer', hit_one: '1 Treffer', hit_n: '{n} Treffer', no_hits: 'Nichts Passendes gefunden',
+      no_hits_hint: 'Zu diesem Anliegen gibt es weder ein Ticket noch eine Seite. Formuliere es ruhig mit den Fachbegriffen, die im Ticket stehen würden, und prüfe noch einmal.',
+      duplicate: 'Duplikat', similar: 'Sehr ähnlich', related: 'Verwandt', similarity: 'Ähnlichkeit {n} %',
+      by_keyword: 'Stichwörter', by_meaning: 'Bedeutung', more_spots: '+{n} weitere Stellen', open: 'Öffnen',
+      v_duplicate: 'Das gibt es sehr wahrscheinlich schon', v_similar: 'Ähnliches ist schon da', v_new: 'Dazu gibt es noch nichts',
+      v_duplicate_hint: 'Bitte zuerst dieses Ticket ansehen, statt ein neues zu schreiben:', v_similar_hint: 'Am nächsten liegt:',
+      v_new_hint: 'Kein Ticket und keine Seite ist diesem Anliegen wirklich ähnlich.',
+      counts: '{d} Duplikat, {s} sehr ähnlich, {r} verwandt', scale_new: 'neu', how: 'So wurde gesucht',
+      how_both: 'Stichwörter und Bedeutung', how_lex: 'nur Stichwörter', how_vec: 'nur Bedeutung',
+      rr_ranking: 'sortiert vom Reranker', rr_gemini: 'sortiert von Gemini', rr_none: 'ohne Reranker', spots: '{n} Stellen in {s} s',
+      stream: 'Wohin gehört das?', stream_tickets: 'Abgeleitet aus den ähnlichsten Tickets.', stream_profile: 'Geschätzt aus den Stream-Beschreibungen, weil kein ähnliches Ticket einen Stream trägt.',
+      stream_none: 'Aus den Daten lässt sich kein Stream ableiten.', like: 'wie', epic: 'Epic', votes_one: '1 Ticket', votes_n: '{n} Tickets',
+      draft: 'Ticket-Text für Jira', draft_ai: 'Mit KI formuliert', draft_rule: 'Ohne KI formuliert', copy: 'Text kopieren', copied: 'Kopiert', questions: 'Das fehlt noch',
+      guide: 'So schreiben ähnliche Tickets', guide_sections: 'Diese Abschnitte kommen dort vor', guide_none: 'ohne Überschriften', chars: '{n} Zeichen',
+      h_data: 'Was in den Daten steckt', data_lede: 'Längen und Aufbau der Tickets und Seiten. Daraus ergibt sich, wie groß die Chunks für die Suche sein sollten.',
+      recalc: 'Neu berechnen', store_bigquery: 'Auswertung über alle Daten in BigQuery', store_memory: 'Auswertung über die Daten im Speicher (ohne BigQuery)',
+      advice: 'Empfohlene Chunk-Größe', advice_ok: 'Deine Einstellung passt zu den Daten.', advice_change: 'Aktuell eingestellt: {c} Zeichen, {o} Überlappung.',
+      advice_how: 'Umstellen: in den Skripteigenschaften CHUNK_CHARS = {c} und CHUNK_OVERLAP = {o} setzen, dann im Editor abgleichVoll ausführen.',
+      chars_unit: 'Zeichen', overlap: 'Überlappung', est: 'Erwartet rund {n} Chunks. Bis alles eingebettet ist, braucht der Abgleich etwa so viele Läufe: {r}.',
+      jira: 'Jira-Tickets', confluence: 'Confluence-Seiten', entries: 'Einträge', chunks: 'Chunks', embedded: 'davon mit Vektor',
+      length: 'Textlänge in Zeichen', median: 'Median', p90: '90 % bis', longest: 'längster', chunk_mark: 'Chunk {n}',
+      strip_alt: 'Die Hälfte der Texte ist höchstens {m} Zeichen lang, 90 % höchstens {p}. Ein Chunk fasst {c} Zeichen.',
+      empty: 'ohne Text', dup_titles: 'doppelte Titel', with_headings: 'mit Überschriften', sec_per: 'Überschriften je Eintrag (Median)',
+      sec_len: 'Abschnittslänge (50 / 75 / 90 %)', one_chunk: 'passen in einen Chunk', sample: 'Stichprobe {n}',
+      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence-Bereiche', sync: 'Letzter Abgleich', sync_none: 'Noch kein Abgleich gelaufen. Im Editor abgleichEinrichten ausführen.',
+      no_data: 'Noch keine Daten', no_data_hint: 'Sobald der Abgleich gelaufen ist, steht hier die Auswertung.',
+      failed: 'Das hat nicht geklappt', retry: 'Erneut versuchen', loading: 'Wird geladen …'
+    },
+    en: {
+      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', recent: 'Recently checked',
+      recent_empty: 'Your latest requests appear here, in this browser only.', lang: 'Language', theme_dark: 'Dark view', theme_light: 'Light view',
+      h_match: 'Does this already exist?', lede: 'Describe your request in your own words. It is compared with every Jira ticket and Confluence page.',
+      mode: 'What would you like to do?', mode_check: 'Check only', mode_wish: 'Request to International',
+      mode_check_hint: 'Shows whether the topic already exists.', mode_wish_hint: 'Also shows where the request belongs and drafts the ticket text.',
+      text_label: 'Your request', placeholder: 'e.g. The order proposal should consider public holidays per country so stores do not under-order before a holiday.',
+      sources: 'Sources', country: 'Country', run: 'Check', running: 'Checking', try: 'Try an example',
+      step1: 'Searching by keywords and by meaning …', step2: 'Reranker is ordering the best passages …', step3: 'Putting the result together …',
+      hits: 'Matches', hit_one: '1 match', hit_n: '{n} matches', no_hits: 'Nothing suitable found',
+      no_hits_hint: 'There is no ticket or page on this request. Try the technical terms a ticket would use and check again.',
+      duplicate: 'Duplicate', similar: 'Very similar', related: 'Related', similarity: 'Similarity {n}%',
+      by_keyword: 'Keywords', by_meaning: 'Meaning', more_spots: '+{n} more passages', open: 'Open',
+      v_duplicate: 'This very likely exists already', v_similar: 'Something similar exists', v_new: 'Nothing on this yet',
+      v_duplicate_hint: 'Please look at this ticket first instead of writing a new one:', v_similar_hint: 'The closest one is:',
+      v_new_hint: 'No ticket and no page is really similar to this request.',
+      counts: '{d} duplicate, {s} very similar, {r} related', scale_new: 'new', how: 'How it was searched',
+      how_both: 'keywords and meaning', how_lex: 'keywords only', how_vec: 'meaning only',
+      rr_ranking: 'ordered by the reranker', rr_gemini: 'ordered by Gemini', rr_none: 'no reranker', spots: '{n} passages in {s} s',
+      stream: 'Where does it belong?', stream_tickets: 'Derived from the most similar tickets.', stream_profile: 'Estimated from the stream descriptions because no similar ticket carries a stream.',
+      stream_none: 'The data does not suggest a stream.', like: 'like', epic: 'Epic', votes_one: '1 ticket', votes_n: '{n} tickets',
+      draft: 'Ticket text for Jira', draft_ai: 'Written with AI', draft_rule: 'Written without AI', copy: 'Copy text', copied: 'Copied', questions: 'Still missing',
+      guide: 'How similar tickets are written', guide_sections: 'Sections used there', guide_none: 'no headings', chars: '{n} characters',
+      h_data: 'What is in the data', data_lede: 'Length and structure of tickets and pages. This tells how large the passages for search should be.',
+      recalc: 'Recalculate', store_bigquery: 'Analysis of all data in BigQuery', store_memory: 'Analysis of the data in memory (no BigQuery)',
+      advice: 'Recommended chunk size', advice_ok: 'Your setting fits the data.', advice_change: 'Current setting: {c} characters, {o} overlap.',
+      advice_how: 'To change: set CHUNK_CHARS = {c} and CHUNK_OVERLAP = {o} in the script properties, then run abgleichVoll in the editor.',
+      chars_unit: 'characters', overlap: 'overlap', est: 'About {n} chunks expected. Sync runs needed until everything is embedded: about {r}.',
+      jira: 'Jira tickets', confluence: 'Confluence pages', entries: 'entries', chunks: 'chunks', embedded: 'with a vector',
+      length: 'Text length in characters', median: 'Median', p90: '90% up to', longest: 'longest', chunk_mark: 'Chunk {n}',
+      strip_alt: 'Half of the texts have at most {m} characters, 90% at most {p}. One chunk holds {c} characters.',
+      empty: 'without text', dup_titles: 'duplicate titles', with_headings: 'with headings', sec_per: 'Headings per entry (median)',
+      sec_len: 'Section length (50 / 75 / 90%)', one_chunk: 'fit into one chunk', sample: 'Sample of {n}',
+      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence spaces', sync: 'Last sync', sync_none: 'No sync has run yet. Run abgleichEinrichten in the editor.',
+      no_data: 'No data yet', no_data_hint: 'The analysis appears here once the sync has run.',
+      failed: 'That did not work', retry: 'Try again', loading: 'Loading …'
+    }
+  };
 
-  function remove(key) { try { localStorage.removeItem(key); } catch (err) { /* privat: egal */ } }
-  function now() { return Math.round(performance.now()); }
-  function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  var store = {
+    get: function (k, fallback) { try { var v = localStorage.getItem(k); return v === null ? fallback : v; } catch (e) { return fallback; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ohne Speicher */ } }
+  };
+  var S = { path: '/abgleich', ctx: null, lang: store.get('lang', 'de') === 'en' ? 'en' : 'de', busy: false, fatal: '', step: 0,
+    form: { text: '', modus: 'pruefen', country: '', quellen: ['jira', 'confluence'] } };
 
-  // ------------------------------------------------------------ Server
+  function t(key, vars) {
+    var s = (TEXT[S.lang] && TEXT[S.lang][key]) || TEXT.de[key] || key;
+    return vars ? s.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] === undefined ? m : String(vars[k]); }) : s;
+  }
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function num(n) { return Number(n || 0).toLocaleString(S.lang === 'en' ? 'en-GB' : 'de-DE'); }
+  function icon(name) { return '<svg class="ic" aria-hidden="true" focusable="false"><use href="#i-' + name + '"/></svg>'; }
+  function safeUrl(u) { return /^https?:\/\//i.test(String(u || '')) ? String(u) : ''; }
+  function link(url, label, cls) {
+    var u = safeUrl(url);
+    return u ? '<a class="' + (cls || '') + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : '<span class="' + (cls || '') + '">' + label + '</span>';
+  }
 
-  // Apps Script führt für alle Nutzer zusammen höchstens 30 Aufrufe gleichzeitig aus; darüber kommt ein Fehler.
-  var RETRY_RX = /too many|simultaneous|gleichzeitig|zu viele|invoked too many|network|failed to fetch|timeout|überlastet/i;
-
-  /** Ruft apiRequest auf. GET wird bei Überlast oder Netzfehler bis zu zweimal wiederholt, mit wachsender, zufälliger
-   *  Wartezeit (damit nicht alle zugleich wiederkommen). POST nie: ein Ticket darf nicht doppelt entstehen. */
-  function callServer(method, path, params, attempt) {
-    attempt = attempt || 0;
-    if (window.PERF_ON) { params = Object.assign({}, params || {}); params._perf = ['1']; }
+  function api(method, path, params) {
     return new Promise(function (resolve, reject) {
-      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).apiRequest(method, path, params);
-    }).then(parseAnswer, function (err) {
-      err = err instanceof Error ? err : new Error(String(err));
-      if (method !== 'GET' || attempt >= 2 || !RETRY_RX.test(err.message)) throw err;
-      return wait(500 * Math.pow(3, attempt) * (0.5 + Math.random())).then(function () { return callServer(method, path, params, attempt + 1); });
-    });
-  }
-  function parseAnswer(text) {
-    try { return JSON.parse(text); } catch (err) { throw new Error('Antwort nicht lesbar.'); }
-  }
-
-  /** Die erste Anfrage hat Index.html schon gestartet (BOOT); hier wird sie einmal abgeholt. */
-  function takeBoot(full) {
-    var boot = window.BOOT;
-    if (!boot || boot.used || boot.full !== full) return null;
-    boot.used = true;
-    var p = splitPath(full);
-    return boot.promise.then(parseAnswer, function (err) {
-      err = err instanceof Error ? err : new Error(String(err));
-      if (!RETRY_RX.test(err.message)) throw err;
-      return callServer('GET', p.path, withEtag(paramsFromQuery(p.query), pcGet(full)), 1);
+      if (!(window.google && google.script && google.script.run)) { reject(new Error('google.script.run fehlt')); return; }
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject).apiRequest(method, path, params || {});
+    }).then(function (text) {
+      var d = JSON.parse(text);
+      if (d.fatal) throw new Error(d.fatal);
+      return d;
     });
   }
 
-  function paramsFromQuery(qs) {
-    var out = {};
-    new URLSearchParams(qs || '').forEach(function (value, key) { if (key.charAt(0) !== '_') (out[key] = out[key] || []).push(value); });
-    return out;
+  // ---------- Zuletzt geprüft (nur in diesem Browser) ----------
+
+  function recent() { try { var l = JSON.parse(store.get('recent', '[]')); return Array.isArray(l) ? l.slice(0, 8) : []; } catch (e) { return []; } }
+  function remember(form, level) {
+    var list = recent().filter(function (r) { return r.text !== form.text; });
+    list.unshift({ text: form.text.slice(0, 600), modus: form.modus, level: level });
+    store.set('recent', JSON.stringify(list.slice(0, 8)));
   }
 
-  function withEtag(params, cached) {
-    if (cached && cached.etag) params._etag = [cached.etag];
-    return params;
+  // ---------- Rahmen ----------
+
+  function shell(main) {
+    var nav = [['/abgleich', 'search', t('match')], ['/daten', 'data', t('data')]].map(function (n) {
+      return '<a class="nav-link" href="#' + n[0] + '"' + (S.path === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[1]) + '<span>' + n[2] + '</span></a>';
+    }).join('');
+    var list = recent();
+    var rec = list.length ? '<ul class="recent-list">' + list.map(function (r, i) {
+      return '<li><button type="button" class="recent-item" data-recent="' + i + '"><span class="dot lvl-' + esc(r.level || 'new') + '" aria-hidden="true"></span><span class="recent-text">' + esc(r.text) + '</span></button></li>';
+    }).join('') + '</ul>' : '<p class="recent-empty">' + t('recent_empty') + '</p>';
+    var dark = document.documentElement.dataset.theme === 'dark';
+    return '<a class="skip" href="#main">' + t('skip') + '</a><div class="shell">' +
+      '<aside class="rail"><div class="brand"><img src="' + MARK_SRC + '" alt="" width="30" height="30"><span>' + esc(window.APP_NAME || '') + '</span></div>' +
+      '<nav class="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
+      '<section class="recent" aria-labelledby="h-recent"><h2 id="h-recent">' + t('recent') + '</h2>' + rec + '</section>' +
+      '<div class="rail-foot"><div class="lang" role="group" aria-label="' + t('lang') + '">' +
+      ['de', 'en'].map(function (l) { return '<button type="button" data-lang="' + l + '" aria-pressed="' + (S.lang === l) + '">' + l.toUpperCase() + '</button>'; }).join('') + '</div>' +
+      '<button type="button" class="icon-btn" data-theme-toggle aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '" title="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button></div></aside>' +
+      '<main id="main" class="main" tabindex="-1">' + main + '</main></div>';
   }
 
-  function paramsFromForm(form, submitter) {
-    var data;
-    try { data = new FormData(form, submitter || undefined); } catch (err) {
-      data = new FormData(form);
-      if (submitter && submitter.name) data.append(submitter.name, submitter.value);
+  function banner(lines) {
+    lines = (lines || []).filter(String);
+    return lines.length ? '<div class="banner" role="status">' + icon('alert') + '<div>' + lines.map(function (l) { return '<p>' + esc(l) + '</p>'; }).join('') + '</div></div>' : '';
+  }
+
+  // ---------- Seite Abgleich ----------
+
+  function composer(ctx) {
+    var f = S.form, wish = f.modus === 'wunsch';
+    var modes = [['pruefen', t('mode_check')], ['wunsch', t('mode_wish')]].map(function (m) {
+      return '<label class="seg-item"><input type="radio" name="modus" value="' + m[0] + '"' + (f.modus === m[0] ? ' checked' : '') + '><span>' + m[1] + '</span></label>';
+    }).join('');
+    var src = [['jira', 'Jira', 'ticket'], ['confluence', 'Confluence', 'page']].map(function (s) {
+      return '<label class="chip"><input type="checkbox" name="quelle" value="' + s[0] + '"' + (f.quellen.indexOf(s[0]) >= 0 ? ' checked' : '') + '>' + icon(s[2]) + '<span>' + s[1] + '</span></label>';
+    }).join('');
+    var countries = (ctx.countries || []).map(function (c) { return '<option' + (c === f.country ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+    return '<form class="composer" id="composer" novalidate>' +
+      '<fieldset class="seg"><legend class="sr-only">' + t('mode') + '</legend>' + modes + '</fieldset>' +
+      '<p class="mode-hint" id="mode-hint">' + t(wish ? 'mode_wish_hint' : 'mode_check_hint') + '</p>' +
+      '<label class="sr-only" for="text">' + t('text_label') + '</label>' +
+      '<textarea id="text" name="text" rows="' + (ctx.result ? 3 : 5) + '" maxlength="6000" placeholder="' + esc(t('placeholder')) + '" aria-describedby="mode-hint">' + esc(f.text) + '</textarea>' +
+      '<div class="composer-row"><fieldset class="chips"><legend class="sr-only">' + t('sources') + '</legend>' + src + '</fieldset>' +
+      (wish ? '<label class="country"><span>' + t('country') + '</span><select name="country">' + countries + '</select></label>' : '') +
+      '<button type="submit" class="btn"' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? '<span class="spinner" aria-hidden="true"></span>' + t('running') : icon('send') + t('run')) + '</button></div></form>';
+  }
+
+  function ring(score, level) {
+    var c = 2 * Math.PI * 17, off = c * (1 - Math.max(0, Math.min(100, score)) / 100);
+    return '<div class="ring lvl-' + level + '" role="img" aria-label="' + esc(t('similarity', { n: score })) + '"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="ring-track" cx="20" cy="20" r="17"/>' +
+      '<circle class="ring-value" cx="20" cy="20" r="17" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"/></svg><b>' + score + '</b></div>';
+  }
+
+  function hitItem(h, streams) {
+    var tags = [];
+    if (h.status) tags.push('<span class="tag">' + esc(h.status) + '</span>');
+    if (h.stream) tags.push('<span class="tag tag-stream">' + esc(streams[h.stream] || h.stream) + '</span>');
+    if (h.space) tags.push('<span class="tag">' + esc(h.space) + '</span>');
+    var passages = h.passages.map(function (p) {
+      return '<p class="passage">' + (p.heading ? '<span class="path">' + esc(p.heading) + '</span>' : '') + esc(p.text || h.title) + '</p>';
+    }).join('');
+    var via = (h.by_keyword ? '<span class="via">' + icon('word') + t('by_keyword') + '</span>' : '') + (h.by_meaning ? '<span class="via">' + icon('sense') + t('by_meaning') + '</span>' : '');
+    return '<li class="hit lvl-' + h.level + '">' + ring(h.score, h.level) + '<div class="hit-body">' +
+      '<div class="hit-meta"><span class="pill lvl-' + h.level + '">' + t(h.level) + '</span><span class="src">' + icon(h.source === 'jira' ? 'ticket' : 'page') +
+      esc(h.source === 'jira' ? h.id : 'Confluence') + '</span>' + tags.join('') + '</div>' +
+      '<h3>' + link(h.url, esc(h.title) + (safeUrl(h.url) ? icon('out') : ''), 'hit-title') + '</h3>' + passages +
+      '<p class="hit-foot">' + via + (h.n_passages > h.passages.length ? '<span>' + t('more_spots', { n: h.n_passages - h.passages.length }) + '</span>' : '') + '</p></div></li>';
+  }
+
+  function verdictCard(r) {
+    var v = r.verdict, s = r.search, top = r.hits.length ? r.hits.reduce(function (a, h) { return Math.max(a, h.score); }, 0) : 0;
+    var scale = '';
+    if (s.scale) {
+      scale = '<div class="meter" aria-hidden="true"><div class="meter-track"><span class="meter-zone z-similar" style="left:' + s.scale.similar + '%;width:' + (s.scale.duplicate - s.scale.similar) + '%"></span>' +
+        '<span class="meter-zone z-duplicate" style="left:' + s.scale.duplicate + '%;width:' + (100 - s.scale.duplicate) + '%"></span>' +
+        '<span class="meter-pin lvl-' + v.level + '" style="left:' + top + '%"></span></div>' +
+        '<div class="meter-labels"><span>' + t('scale_new') + '</span><span style="left:' + s.scale.similar + '%">' + t('similar') + '</span><span style="left:' + s.scale.duplicate + '%">' + t('duplicate') + '</span></div></div>';
     }
-    var out = {};
-    data.forEach(function (value, key) { (out[key] = out[key] || []).push(String(value)); });
-    return out;
+    var how = t(s.lexical && s.vector ? 'how_both' : s.vector ? 'how_vec' : 'how_lex') + ', ' + t('rr_' + s.reranker) + '. ' + t('spots', { n: s.passages, s: (s.ms / 1000).toFixed(1).replace('.', S.lang === 'en' ? '.' : ',') });
+    return '<section class="card verdict lvl-' + v.level + '" aria-labelledby="h-verdict"><h2 id="h-verdict" tabindex="-1">' + t('v_' + v.level) + '</h2>' +
+      '<p class="verdict-hint">' + t('v_' + v.level + '_hint') + '</p>' +
+      (v.top ? '<p class="verdict-top">' + link(v.top.url, esc((v.top.source === 'jira' ? v.top.id + ' ' : '') + v.top.title), 'verdict-link') + '</p>' : '') + scale +
+      (r.hits.length ? '<p class="fine">' + t('counts', { d: v.duplicates, s: v.similar, r: v.related }) + '</p>' : '') +
+      '<p class="fine"><span class="fine-label">' + t('how') + ':</span> ' + how + '</p></section>';
   }
 
-  function splitPath(full) {
-    var i = full.indexOf('?');
-    return i < 0 ? { path: full || '/', query: '' } : { path: full.slice(0, i) || '/', query: full.slice(i + 1) };
+  function streamCard(r) {
+    if (r.modus !== 'wunsch' && !r.streams.length) return '';
+    var rows = r.streams.map(function (s, i) {
+      return '<li class="bar-row' + (i === 0 ? ' is-top' : '') + '"><div class="bar-head"><span class="bar-name">' + esc(s.name) + '</span><span class="bar-val">' + s.share + ' %</span></div>' +
+        '<div class="bar"><span style="width:' + Math.max(3, s.share) + '%"></span></div>' +
+        (s.examples && s.examples.length ? '<p class="fine">' + t('like') + ' ' + s.examples.map(esc).join(', ') + '</p>' : '') + '</li>';
+    }).join('');
+    var epics = r.epics.length ? '<p class="epics"><span class="fine-label">' + t('epic') + ':</span> ' + r.epics.slice(0, 3).map(function (e) {
+      return '<span class="tag">' + esc(e.id) + ' <b>' + e.share + ' %</b></span>';
+    }).join(' ') + '</p>' : '';
+    return '<section class="card" aria-labelledby="h-stream"><h2 id="h-stream">' + t('stream') + '</h2><p class="fine">' + t('stream_' + r.stream_basis) + '</p>' +
+      (rows ? '<ul class="bars">' + rows + '</ul>' : '') + epics + '</section>';
   }
 
-  // ------------------------------------------------------------ Seiten-Cache: letzter Stand im Browser
-  // Listen und Übersichten erscheinen sofort aus dem Speicher; danach fragt der Browser mit der Kennung (etag) nach.
-  // Unverändert kommt nur {same}, sonst die neue Seite. Nur für die angemeldete Person (VIEWER), höchstens 12 Seiten.
-
-  var PC = 'pc1:', PC_MAX = 12, PC_ENTRY = 400000, PC_TOTAL = 2500000, PC_FRESH = 15000;
-  var PC_RX = /^\/(tickets|meine-tickets|streams|bugs\/[^/]+|dokumente|releases|admin)?$/;
-
-  function cacheable(full) { return !!window.VIEWER && PC_RX.test(splitPath(full).path); }
-  function pcIndex() { try { return JSON.parse(read('pc-index') || '[]'); } catch (err) { return []; } }
-  function pcEntry(full) { return pcIndex().filter(function (x) { return x.k === full; })[0] || null; }
-  function pcGet(full) {
-    if (!cacheable(full)) return null;
-    try { return JSON.parse(read(PC + full) || 'null'); } catch (err) { return null; }
-  }
-  function pcSaveIndex(index) { store('pc-index', JSON.stringify(index)); }
-  function pcPut(full, res) {
-    if (!cacheable(full) || !res.etag) return;
-    var raw = JSON.stringify({ template: res.template, ctx: res.ctx, etag: res.etag });
-    if (raw.length > PC_ENTRY) return;
-    var index = pcIndex().filter(function (x) { return x.k !== full; });
-    index.unshift({ k: full, etag: res.etag, size: raw.length, t: Date.now() });
-    var total = 0;
-    index = index.filter(function (x, n) {
-      total += x.size;
-      var keep = n < PC_MAX && total <= PC_TOTAL;
-      if (!keep) remove(PC + x.k);
-      return keep;
-    });
-    try { localStorage.setItem(PC + full, raw); pcSaveIndex(index); } catch (err) { pcClear(); }
-  }
-  function pcTouch(full) {
-    var index = pcIndex();
-    index.forEach(function (x) { if (x.k === full) x.t = Date.now(); });
-    pcSaveIndex(index);
-  }
-  function pcFresh(full, ms) { var x = pcEntry(full); return !!x && Date.now() - x.t < ms; }
-  function pcClear() { pcIndex().forEach(function (x) { remove(PC + x.k); }); remove('pc-index'); }
-
-  // ------------------------------------------------------------ Messen (?perf=1)
-
-  var perfRows = [], firstPage = null;
-  function perfNote(full, ms, res, source) {
-    if (firstPage === null && res && (res.template || source === 'Cache')) firstPage = now();
-    if (!window.PERF_ON) return;
-    var s = res && res.perf;
-    var line = 'api ' + full + ' ' + ms + ' ms' + (source ? ' (' + source + ')' : '') + (res && res.same ? ', unverändert' : '') +
-      (s ? ' · Server ' + s.ms + ' ms, ' + (s.bytes / 1024).toFixed(1) + ' KB, ' + s.fetches + ' Abrufe ' + s.fetchMs + ' ms, Cache ' + s.cacheHits + '/' + (s.cacheHits + s.cacheMisses) : '');
-    console.log(line);
-    perfRows.unshift(line);
-    perfRows.length = Math.min(perfRows.length, 12);
-    var panel = document.getElementById('perf-panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'perf-panel'; panel.className = 'perf-panel'; panel.setAttribute('role', 'status');
-      document.body.appendChild(panel);
+  function draftCard(r) {
+    if (!r.draft) return '';
+    var d = r.draft, g = r.guide || { examples: [], sections: [] };
+    var q = d.open_questions && d.open_questions.length ? '<h3>' + t('questions') + '</h3><ul class="plain">' + d.open_questions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '';
+    var guide = '';
+    if (g.examples.length) {
+      guide = '<section class="card" aria-labelledby="h-guide"><h2 id="h-guide">' + t('guide') + '</h2><ul class="guide">' + g.examples.map(function (e) {
+        return '<li>' + link(e.url, esc(e.id + ' ' + e.title), 'guide-link') + '<p class="fine">' + (e.sections.length ? e.sections.map(esc).join(', ') : t('guide_none')) + '. ' + t('chars', { n: num(e.chars) }) + '</p></li>';
+      }).join('') + '</ul>' + (g.sections.length ? '<p class="fine"><span class="fine-label">' + t('guide_sections') + ':</span> ' + g.sections.map(function (s) { return esc(s.name); }).join(', ') + '</p>' : '') + '</section>';
     }
-    panel.textContent = '';
-    var head = document.createElement('p'); head.innerHTML = '<b>?perf=1</b> ';
-    head.appendChild(document.createTextNode('Start bis erste Seite ' + firstPage + ' ms'));
-    panel.appendChild(head);
-    perfRows.forEach(function (r) { var el = document.createElement('p'); el.textContent = r; el.title = r; panel.appendChild(el); });
+    return '<section class="card draft" aria-labelledby="h-draft"><div class="card-head"><h2 id="h-draft">' + t('draft') + '</h2>' +
+      '<button type="button" class="btn btn-quiet" data-copy>' + icon('copy') + '<span>' + t('copy') + '</span></button></div>' +
+      '<p class="fine">' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + (d.notice ? '. ' + esc(d.notice) : '') + '</p>' +
+      '<pre class="markup" id="markup" tabindex="0">' + esc(d.markup) + '</pre>' + q + '</section>' + guide;
   }
 
-  // ------------------------------------------------------------ Seitenwechsel
-
-  var busy = 0;
-  function setBusy(on) {
-    busy += on ? 1 : -1;
-    progress.classList.toggle('is-active', busy > 0);
-    document.body.setAttribute('aria-busy', busy > 0 ? 'true' : 'false');
+  function results(ctx) {
+    if (S.busy) {
+      return '<div class="waiting" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="step">' + t('step' + (S.step + 1)) + '</span></div>' +
+        '<div class="skel-list" aria-hidden="true"><span></span><span></span><span></span></div>';
+    }
+    if (ctx.error) return '<div class="banner is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(ctx.error) + '</p></div></div>';
+    var r = ctx.result;
+    if (!r) return '';
+    var names = ctx.stream_names || {};
+    var list = r.hits.length ? '<ol class="hit-list">' + r.hits.map(function (h) { return hitItem(h, names); }).join('') + '</ol>'
+      : '<div class="empty"><p class="empty-title">' + t('no_hits') + '</p><p>' + t('no_hits_hint') + '</p></div>';
+    return banner((ctx.notices || []).concat(r.search.note ? [r.search.note] : [])) +
+      '<div class="grid"><section class="hits" aria-labelledby="h-hits"><h2 id="h-hits">' + (r.hits.length === 1 ? t('hit_one') : t('hit_n', { n: r.hits.length })) + '</h2>' + list + '</section>' +
+      '<div class="side">' + verdictCard(r) + streamCard(r) + draftCard(r) + '</div></div>';
   }
 
-  function hashPath() {
-    var h = decodeURI(location.hash.replace(/^#/, ''));
-    return h && h.charAt(0) === '/' ? h : '/';
+  function matchPage(ctx) {
+    var has = !!(ctx.result || ctx.error || S.busy);
+    var ex = (ctx.examples || []).map(function (e, i) { return '<button type="button" class="chip-btn" data-example="' + i + '">' + esc(e.label) + '</button>'; }).join('');
+    return '<div class="page' + (has ? ' has-result' : ' is-start') + '"><header class="page-head"><h1>' + t('h_match') + '</h1><p class="lede">' + t('lede') + '</p></header>' +
+      composer(ctx) + (has ? '' : '<div class="examples"><span>' + t('try') + '</span>' + ex + '</div>') +
+      '<div id="result">' + results(ctx) + '</div></div>';
   }
 
-  /** Zu einem Pfad wechseln. Gleicher Pfad lädt die Seite neu (wie ein Klick im Browser). */
-  function navigate(full, anchor) {
-    if ('#' + full === location.hash || (full === '/' && !location.hash)) load('GET', full, null, anchor);
-    else { pendingAnchor = anchor || null; location.hash = full; }
-  }
-  var pendingAnchor = null;
+  // ---------- Seite Daten ----------
 
-  window.addEventListener('hashchange', function () {
-    var full = hashPath();
-    if (suppressHash === full) { suppressHash = null; return; }
-    var anchor = pendingAnchor; pendingAnchor = null;
-    load('GET', full, null, anchor);
+  function strip(s, cfg) {
+    var max = Math.max(s.len.p99, cfg.chars * 1.25, 1), pct = function (v) { return Math.min(100, 100 * v / max).toFixed(2); };
+    return '<div class="strip" role="img" aria-label="' + esc(t('strip_alt', { m: num(s.len.p50), p: num(s.len.p90), c: num(cfg.chars) })) + '">' +
+      '<div class="strip-track"><span class="strip-band" style="left:' + pct(s.len.p10) + '%;width:' + (pct(s.len.p90) - pct(s.len.p10)).toFixed(2) + '%"></span>' +
+      '<span class="strip-box" style="left:' + pct(s.len.p25) + '%;width:' + Math.max(0.6, pct(s.len.p75) - pct(s.len.p25)).toFixed(2) + '%"></span>' +
+      '<span class="strip-median" style="left:' + pct(s.len.p50) + '%"></span><span class="strip-chunk" style="left:' + pct(cfg.chars) + '%"><i>' + t('chunk_mark', { n: num(cfg.chars) }) + '</i></span></div>' +
+      '<div class="strip-axis"><span>0</span><span>' + num(Math.round(max)) + '</span></div></div>';
+  }
+
+  function sourceCard(s, rep) {
+    var state = (rep.chunks || []).filter(function (c) { return c.source === s.source; })[0] || { chunks: 0, embedded: 0 };
+    var st = s.structure || { sample: 0, with_headings: 0, sections_per_doc: 0, section_len: { p50: 0, p75: 0, p90: 0 } };
+    var row = function (k, v) { return '<div class="kv"><dt>' + k + '</dt><dd>' + v + '</dd></div>'; };
+    return '<section class="card source" aria-labelledby="h-' + s.source + '"><div class="card-head"><h2 id="h-' + s.source + '">' + icon(s.source === 'jira' ? 'ticket' : 'page') + t(s.source) + '</h2>' +
+      '<span class="fine">' + t('sample', { n: num(st.sample) }) + '</span></div>' +
+      '<div class="tiles"><div class="tile"><b>' + num(s.docs) + '</b><span>' + t('entries') + '</span></div><div class="tile"><b>' + num(state.chunks) + '</b><span>' + t('chunks') + '</span></div>' +
+      '<div class="tile"><b>' + num(state.embedded) + '</b><span>' + t('embedded') + '</span></div></div>' +
+      '<h3>' + t('length') + '</h3>' + strip(s, rep.advice) +
+      '<dl class="kvs">' + row(t('median'), num(s.len.p50)) + row(t('p90'), num(s.len.p90)) + row(t('longest'), num(s.len.max)) +
+      row(t('one_chunk'), (s.single_chunk === undefined ? 100 : s.single_chunk) + ' %') + row(t('with_headings'), st.with_headings + ' %') + row(t('sec_per'), num(st.sections_per_doc)) +
+      row(t('sec_len'), num(st.section_len.p50) + ' / ' + num(st.section_len.p75) + ' / ' + num(st.section_len.p90)) +
+      row(t('empty'), num(s.empty)) + row(t('dup_titles'), num(s.dup_titles)) + '</dl></section>';
+  }
+
+  function groupCard(title, rows) {
+    if (!rows || !rows.length) return '';
+    var max = rows.reduce(function (a, r) { return Math.max(a, r.n); }, 1);
+    return '<section class="card"><h2>' + title + '</h2><ul class="bars compact">' + rows.map(function (r) {
+      return '<li class="bar-row"><div class="bar-head"><span class="bar-name">' + esc(r.name) + '</span><span class="bar-val">' + num(r.n) + '</span></div><div class="bar"><span style="width:' + Math.max(2, 100 * r.n / max).toFixed(1) + '%"></span></div></li>';
+    }).join('') + '</ul></section>';
+  }
+
+  function dataPage(ctx) {
+    var rep = ctx.report;
+    var head = '<header class="page-head row"><div><h1>' + t('h_data') + '</h1><p class="lede">' + t('data_lede') + '</p></div>' +
+      '<button type="button" class="btn btn-quiet" data-recalc' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? '<span class="spinner" aria-hidden="true"></span>' : icon('refresh')) + '<span>' + t('recalc') + '</span></button></header>';
+    var err = ctx.error ? '<div class="banner is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(ctx.error) + '</p></div></div>' : '';
+    if (!rep || !rep.sources.some(function (s) { return s.docs > 0; })) {
+      return '<div class="page">' + head + err + banner(ctx.notices) + '<div class="empty"><p class="empty-title">' + t('no_data') + '</p><p>' + t(ctx.store === 'bigquery' ? 'sync_none' : 'no_data_hint') + '</p></div></div>';
+    }
+    var a = rep.advice;
+    var advice = '<section class="card advice" aria-labelledby="h-advice"><h2 id="h-advice">' + t('advice') + '</h2>' +
+      '<p class="advice-value"><b>' + num(a.chars) + '</b> ' + t('chars_unit') + '<span class="advice-plus">' + num(a.overlap) + ' ' + t('overlap') + '</span></p>' +
+      '<p class="advice-state">' + (a.differs ? t('advice_change', { c: num(rep.config.chars), o: num(rep.config.overlap) }) : icon('check') + t('advice_ok')) + '</p>' +
+      (a.differs ? '<p class="fine">' + t('advice_how', { c: a.chars, o: a.overlap }) + '</p>' : '') +
+      '<ul class="plain">' + a.lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' +
+      '<p class="fine">' + t('est', { n: num(a.est_chunks), r: num(a.est_runs) }) + '</p></section>';
+    var sync = ctx.store === 'bigquery' ? '<section class="card"><h2>' + t('sync') + '</h2>' + (ctx.sync && ctx.sync.length ? '<ul class="sync">' + ctx.sync.map(function (x) {
+      return '<li><span class="dot ' + (x.ok ? 'ok' : 'bad') + '" aria-hidden="true"></span><div><b>' + esc(x.source === 'jira' ? 'Jira' : 'Confluence') + '</b> <span class="fine">' + esc(x.at) + '</span><p class="fine">' + esc(x.note) + '</p></div></li>';
+    }).join('') + '</ul>' : '<p class="fine">' + t('sync_none') + '</p>') + '</section>' : '';
+    return '<div class="page">' + head + err + banner(ctx.notices) + '<p class="fine store">' + t('store_' + rep.mode) + '</p>' +
+      '<div class="data-grid"><div class="data-main">' + advice + rep.sources.filter(function (s) { return s.docs > 0; }).map(function (s) { return sourceCard(s, rep); }).join('') + '</div>' +
+      '<div class="side">' + sync + groupCard(t('g_stream'), rep.groups.stream) + groupCard(t('g_status'), rep.groups.status) + groupCard(t('g_space'), rep.groups.space) + '</div></div></div>';
+  }
+
+  // ---------- Zeichnen und Bedienen ----------
+
+  var app = document.getElementById('app');
+
+  function draw(keepFocus) {
+    var active = keepFocus && document.activeElement && document.activeElement.id;
+    var main;
+    if (S.fatal) main = '<div class="page"><h1>' + t('failed') + '</h1><div class="banner is-error" role="alert">' + icon('alert') + '<div><p>' + esc(S.fatal) + '</p></div></div><p><button type="button" class="btn" data-retry>' + t('retry') + '</button></p></div>';
+    else if (!S.ctx) main = '<div class="page"><h1 class="sr-only">' + esc(window.APP_NAME || '') + '</h1><div class="waiting" role="status"><span class="spinner" aria-hidden="true"></span>' + t('loading') + '</div></div>';
+    else main = S.path === '/daten' ? dataPage(S.ctx) : matchPage(S.ctx);
+    app.innerHTML = shell(main);
+    document.documentElement.lang = S.lang;
+    document.title = (S.path === '/daten' ? t('data') : t('match')) + ' · ' + (window.APP_NAME || '');
+    if (active) { var el = document.getElementById(active); if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); } }
+  }
+
+  function readForm() {
+    var f = document.getElementById('composer');
+    if (!f) return;
+    var data = new FormData(f);
+    S.form.text = String(data.get('text') || '');
+    S.form.modus = data.get('modus') === 'wunsch' ? 'wunsch' : 'pruefen';
+    S.form.quellen = data.getAll('quelle').map(String);
+    if (data.get('country')) S.form.country = String(data.get('country'));
+  }
+
+  function load(path, params) {
+    S.path = path === '/daten' ? '/daten' : '/abgleich';
+    S.fatal = '';
+    var first = window.BOOT && window.BOOT.path === S.path && !params ? window.BOOT.promise.then(function (text) { var d = JSON.parse(text); if (d.fatal) throw new Error(d.fatal); return d; }) : api('GET', S.path, params);
+    window.BOOT = null;
+    if (!S.ctx || S.ctx.active !== (S.path === '/daten' ? 'daten' : 'abgleich')) { S.ctx = null; draw(); }
+    return first.then(function (d) {
+      S.ctx = d.ctx; S.busy = false;
+      if (S.path === '/abgleich' && !S.form.country) S.form.country = d.ctx.form.country;
+      draw();
+    }).catch(function (e) { S.busy = false; S.fatal = e && e.message ? e.message : String(e); draw(); });
+  }
+
+  var stepTimer = null;
+  function run() {
+    if (S.busy) return;
+    readForm();
+    if (!S.form.quellen.length) S.form.quellen = ['jira', 'confluence'];
+    S.busy = true; S.step = 0;
+    if (S.ctx) { S.ctx.result = null; S.ctx.error = null; }
+    draw();
+    stepTimer = setInterval(function () {
+      S.step = Math.min(2, S.step + 1);
+      var el = document.getElementById('step');
+      if (el) el.textContent = t('step' + (S.step + 1));
+    }, 1800);
+    api('POST', '/abgleich', { text: [S.form.text], modus: [S.form.modus], country: [S.form.country], quelle: S.form.quellen }).then(function (d) {
+      S.ctx = d.ctx;
+      if (d.ctx.result) remember(S.form, d.ctx.result.verdict.level);
+    }).catch(function (e) {
+      if (S.ctx) S.ctx.error = e && e.message ? e.message : String(e); else S.fatal = String(e && e.message || e);
+    }).then(function () {
+      clearInterval(stepTimer);
+      S.busy = false;
+      draw();
+      var h = document.getElementById('h-verdict') || document.querySelector('#result [role=alert]');
+      if (h) { if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: false }); }
+    });
+  }
+
+  function copyText(text, btn) {
+    var done = function () {
+      var label = btn.querySelector('span');
+      if (label) { label.textContent = t('copied'); setTimeout(function () { if (label.isConnected) label.textContent = t('copy'); }, 1800); }
+    };
+    var fallback = function () {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { /* dann von Hand markieren */ }
+      document.body.removeChild(ta);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+  }
+
+  app.addEventListener('submit', function (e) { if (e.target.id === 'composer') { e.preventDefault(); run(); } });
+  app.addEventListener('keydown', function (e) {
+    if (e.target.id === 'text' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
   });
-
-  // Seitenwechsel ohne gespeicherten Stand: sofort Ziel markieren und ein Skelett mit Ladehinweis zeigen, damit man
-  // schnell durch die Seitenleiste klicken kann (die alte Seite bleibt nicht stehen). Seiten aus dem Speicher kommen ohne.
-  var seq = 0, skeletonTimer = null;
-  function skeletonLater(my, path) {
-    clearTimeout(skeletonTimer);
-    skeletonTimer = setTimeout(function () {
-      var main = app.querySelector('main.sheet');
-      if (my !== seq || !main) return;
-      var bar = main.querySelector('.appbar');
-      Array.prototype.slice.call(main.children).forEach(function (el) { if (el !== bar) el.remove(); });
-      main.insertAdjacentHTML('beforeend', skeletonFor(path));
-      // Navigation und Titel zeigen schon das Ziel, damit das Skelett nicht zur alten Seite gehört.
-      var target = app.querySelector('.nav a.nav-item[href="#' + path.split('/').slice(0, 2).join('/') + '"]');
-      if (target) {
-        app.querySelectorAll('.nav a.nav-item.is-active').forEach(function (a) { a.classList.remove('is-active'); a.removeAttribute('aria-current'); });
-        target.classList.add('is-active'); target.setAttribute('aria-current', 'page');
-      }
-      var title = main.querySelector('.appbar-title');
-      if (title) title.textContent = target ? target.textContent.replace(/\d+\s*$/, '').trim() : '';
-    }, 0);
-  }
-  function skeletonFor(path) {
-    function s(cls) { return '<span class="skel ' + cls + '"></span>'; }
-    function rows(n) { var h = ''; for (var i = 0; i < n; i++) h += s('skel-row'); return '<div class="skel-rows">' + h + '</div>'; }
-    var body;
-    if (path === '/') body = '<div class="skel-grid">' + s('skel-kpi') + s('skel-kpi') + s('skel-kpi') + s('skel-kpi') + '</div>' + s('skel-card');
-    else if (/^\/(tickets|meine-tickets|releases|dokumente)$/.test(path)) body = rows(8);
-    else if (/^\/(ticket|wissen|admin)$/.test(path)) body = s('skel-form');
-    else body = s('skel-card') + rows(4);
-    return '<p class="loading-note" role="status"><span class="spinner" aria-hidden="true"></span>' + e(t('Daten werden geladen …')) + '</p>' +
-      '<div class="skel-page" aria-hidden="true">' + s('skel-title') + s('skel-line') + body + '</div>';
-  }
-
-  /** GET: Pfad mit Query. POST: Formularfelder als params. */
-  function load(method, full, params, anchor, opts) {
-    var p = splitPath(full);
-    opts = opts || {};
-    var my = ++seq, started = now(), isGet = method === 'GET';
-    var cached = isGet ? pcGet(full) : null;
-    if (cached) {
-      show(cached, method, full, p, anchor, opts);
-      perfNote(full, now() - started, cached, 'Cache');
-      anchor = null;
-      opts = { keepState: true };
-      var bootWaiting = window.BOOT && !window.BOOT.used && window.BOOT.full === full;
-      if (!bootWaiting && pcFresh(full, PC_FRESH)) return Promise.resolve(cached); // gerade erst geholt (z. B. vorgeladen)
-    } else if (isGet) {
-      skeletonLater(my, p.path);
-    }
-    setBusy(true);
-    var boot = isGet ? takeBoot(full) : null;
-    var request = boot || callServer(method, p.path, isGet ? withEtag(paramsFromQuery(p.query), cached) : params);
-    return request.then(function (res) {
-      perfNote(full, now() - started, res, boot ? 'Start' : '');
-      if (my !== seq) return res; // inzwischen auf eine andere Seite gewechselt
-      if (res.fatal) throw new Error(res.fatal);
-      if (res.same) {
-        if (cached) { pcTouch(full); return res; }
-        return callServer(method, p.path, paramsFromQuery(p.query)).then(function (fresh) { return apply(fresh); });
-      }
-      return apply(res);
-    }).catch(function (err) {
-      if (my === seq) showFatal(err.message || String(err));
-      throw err;
-    }).finally(function () {
-      if (my === seq) clearTimeout(skeletonTimer);
-      setBusy(false);
-    });
-
-    function apply(res) {
-      if (my !== seq) return res;
-      if (res.fatal) throw new Error(res.fatal);
-      if (!isGet && /^\/(benutzer|sprache)$/.test(p.path)) pcClear(); // andere Person oder Sprache: alter Stand passt nicht
-      if (res.redirect) { navigate(res.redirect); return res; }
-      if (res.download) { download(res.download.name, res.download.text); return res; }
-      if (res.template) {
-        if (isGet) pcPut(full, res);
-        show(res, method, full, p, anchor, opts);
-      }
-      return res;
-    }
-  }
-
-  function show(res, method, full, p, anchor, opts) {
-    // Nach dem Absenden bleibt die Adresse die der Seite (wie bisher /ticket bzw. /wissen).
-    var shown = method === 'GET' ? full : ({ ticket: '/ticket', knowledge: '/wissen' }[res.template] || p.path);
-    current = splitPath(shown);
-    res.ctx.query_string = current.query;
-    render(res.template, res.ctx, opts);
-    if (method !== 'GET' && hashPath() !== shown) { suppressHash = shown; location.hash = shown; }
-    if (anchor) { var a = document.getElementById(anchor); if (a) a.scrollIntoView(); }
-  }
-
-  // ------------------------------------------------------------ Vorladen: Seite holen, sobald der Zeiger auf dem Link ruht
-
-  var prefetching = false, hoverTimer = null;
-  function prefetch(full) {
-    if (prefetching || !cacheable(full) || full === hashPath() || pcFresh(full, 60000)) return;
-    if (navigator.connection && navigator.connection.saveData) return;
-    prefetching = true; // höchstens eine Vorab-Anfrage je Browser, damit die 30 Plätze für echte Klicks frei bleiben
-    var p = splitPath(full);
-    callServer('GET', p.path, withEtag(paramsFromQuery(p.query), pcGet(full)), 2).then(function (res) {
-      if (res.same) pcTouch(full); else if (res.template) pcPut(full, res);
-    }).catch(function () { /* Vorladen ist nur ein Angebot */ }).finally(function () { prefetching = false; });
-  }
-  function onPointToLink(event) {
-    var a = event.target.closest && event.target.closest('a[href^="#/"]');
-    clearTimeout(hoverTimer);
-    if (!a) return;
-    var full;
-    try { full = decodeURI(a.getAttribute('href').slice(1)); } catch (err) { return; }
-    hoverTimer = setTimeout(function () { prefetch(full); }, 80);
-  }
-  document.addEventListener('mouseover', onPointToLink);
-  document.addEventListener('focusin', onPointToLink);
-
-  function showFatal(message) {
-    var box = document.getElementById('fatal');
-    box.querySelector('span').textContent = 'Das hat nicht geklappt: ' + message + ' Bitte erneut versuchen.';
-    box.hidden = false;
-    clearTimeout(showFatal.timer);
-    showFatal.timer = setTimeout(function () { box.hidden = true; }, 9000);
-  }
-
-  function render(template, ctx, opts) {
-    CTX = ctx;
-    root.lang = ctx.lang;
-    var fn = TEMPLATES[template] || TEMPLATES.notfound;
-    var oldMain = app.querySelector('main.sheet');
-    var scroll = (opts.keepScroll || opts.keepState) && oldMain ? oldMain.scrollTop : 0;
-    // Neuer Stand derselben Seite (nach dem Stand aus dem Speicher): Blättern, Fokus und Eingabe bleiben.
-    var focused = opts.keepState && document.activeElement && document.activeElement.id ? document.activeElement : null;
-    var keep = focused && { id: focused.id, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd };
-    var winScroll = opts.keepState ? window.scrollY : 0;
-    app.innerHTML = fn(ctx);
-    document.title = (app.querySelector('.appbar-title') || {}).textContent + ' · ' + ctx.app_name;
-    applySidebarState();
-    var main = app.querySelector('main.sheet');
-    if (main) main.scrollTop = scroll;
-    window.scrollTo(0, winScroll);
-    if (keep) {
-      var again = document.getElementById(keep.id);
-      if (again) {
-        if (typeof keep.value === 'string' && 'value' in again && again.type !== 'hidden') again.value = keep.value;
-        again.focus({ preventScroll: true });
-        try { if (keep.start !== null && keep.start !== undefined) again.setSelectionRange(keep.start, keep.end); } catch (err) { /* nicht jedes Feld */ }
-      }
-    }
-    app.querySelectorAll('.msgs').forEach(function (box) { box.scrollTop = box.scrollHeight; });
-    drawChart(ctx);
-    if (opts.focus) { var f = document.getElementById(opts.focus); if (f) f.focus({ preventScroll: true }); }
-  }
-
-  // Ticket-Erfassung braucht die volle Breite, unabhängig von der gespeicherten Seitenleiste.
-  function applySidebarState() {
-    var onTicket = current.path === '/ticket' || current.path.indexOf('/ticket/') === 0;
-    var collapsed = onTicket || read('sidebar-collapsed') === 'true';
-    root.classList.toggle('sidebar-collapsed', collapsed);
-    var toggle = document.querySelector('[data-sidebar-toggle]');
-    if (toggle) {
-      var label = collapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen';
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-      toggle.setAttribute('aria-label', label);
-      toggle.setAttribute('title', label);
-    }
-  }
-
-  function download(name, text) {
-    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  }
-
-  function copyText(text) {
-    if (navigator.clipboard && window.isSecureContext) {
-      return navigator.clipboard.writeText(text).catch(function () { return copyFallback(text); });
-    }
-    return Promise.resolve(copyFallback(text));
-  }
-  function copyFallback(text) {
-    var area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.position = 'fixed';
-    area.style.opacity = '0';
-    document.body.appendChild(area);
-    area.select();
-    try { document.execCommand('copy'); } finally { area.remove(); }
-  }
-
-  // ------------------------------------------------------------ Klicks
-
-  document.addEventListener('click', function (event) {
-    var link = event.target.closest('a[href^="#/"]');
-    if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-      event.preventDefault();
-      document.body.classList.remove('nav-open');
-      navigate(decodeURI(link.getAttribute('href').slice(1)), link.getAttribute('data-anchor'));
-      return;
-    }
-    if (event.target.closest('a[data-skip]')) {
-      event.preventDefault();
-      var main = document.getElementById('main');
-      if (main) main.focus();
-      return;
-    }
-    var el = event.target.closest('[data-theme-toggle],[data-dialog-open],[data-dialog-close],[data-nav-open],[data-nav-close],[data-sidebar-toggle],[data-copy],[data-rca-generate],[data-series]');
+  app.addEventListener('change', function (e) {
+    if (e.target.name === 'modus') { readForm(); draw(); var r = document.querySelector('input[name=modus]:checked'); if (r) r.focus(); }
+  });
+  app.addEventListener('click', function (e) {
+    var el = e.target.closest('button, a');
     if (!el) return;
+    if (el.hasAttribute('data-lang')) { readForm(); S.lang = el.getAttribute('data-lang') === 'en' ? 'en' : 'de'; store.set('lang', S.lang); draw(); return; }
     if (el.hasAttribute('data-theme-toggle')) {
-      root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
-      store('theme', root.dataset.theme);
-    } else if (el.hasAttribute('data-sidebar-toggle')) {
-      var collapsed = !root.classList.contains('sidebar-collapsed');
-      store('sidebar-collapsed', String(collapsed));
-      root.classList.toggle('sidebar-collapsed', collapsed);
-      var label = collapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen';
-      el.setAttribute('aria-expanded', String(!collapsed));
-      el.setAttribute('aria-label', label);
-      el.setAttribute('title', label);
-    } else if (el.hasAttribute('data-dialog-open')) {
-      var dialog = document.getElementById(el.getAttribute('data-dialog-open'));
-      if (dialog) dialog.showModal();
-    } else if (el.hasAttribute('data-dialog-close')) {
-      el.closest('dialog').close();
-    } else if (el.hasAttribute('data-nav-open')) {
-      document.body.classList.add('nav-open');
-      el.setAttribute('aria-expanded', 'true');
-      var first = document.querySelector('.sidebar a, .sidebar input');
-      if (first) first.focus();
-    } else if (el.hasAttribute('data-nav-close')) {
-      document.body.classList.remove('nav-open');
-      var opener = document.querySelector('[data-nav-open]');
-      if (opener) { opener.setAttribute('aria-expanded', 'false'); opener.focus(); }
-    } else if (el.hasAttribute('data-copy')) {
-      var source = document.getElementById(el.getAttribute('data-copy'));
-      if (!source) return;
-      copyText(source.value || source.textContent).then(function () {
-        var span = el.querySelector('span');
-        if (!span) return;
-        var before = span.textContent;
-        span.textContent = 'Kopiert';
-        setTimeout(function () { span.textContent = before; }, 1600);
-      });
-    } else if (el.hasAttribute('data-rca-generate')) {
-      generateExplanation(el);
-    } else if (el.hasAttribute('data-series')) {
-      toggleSeries(el);
-    }
-  });
-
-  document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && document.body.classList.contains('nav-open')) {
-      document.querySelector('.scrim').click();
-    }
-    // "/" springt in die Ticketsuche
-    if (event.key === '/' && !event.target.closest('input, textarea, select')) {
-      var search = document.getElementById('top-q');
-      if (search && search.offsetParent !== null) { event.preventDefault(); search.focus(); }
-    }
-    // In Chat-Feldern schickt Enter ab, Umschalt+Enter macht eine neue Zeile
-    if (event.key === 'Enter' && !event.shiftKey && event.target.matches('[data-chat] textarea')) {
-      var form = event.target.closest('[data-chat]');
-      if (form) { event.preventDefault(); form.requestSubmit(); }
-    }
-  });
-
-  // Auswahl in Filterleisten schickt das Formular sofort ab
-  document.addEventListener('change', function (event) {
-    if (!event.target.matches('[data-autosubmit]')) return;
-    if (event.target.matches('select[name=scope]')) {
-      // Ein Epic aus dem vorherigen Stream darf keine Tickets im neuen verstecken.
-      var epic = event.target.form.querySelector('input[name="epic"]');
-      if (epic) epic.remove();
-    }
-    event.target.form.requestSubmit();
-  });
-
-  // ------------------------------------------------------------ Formulare
-
-  document.addEventListener('submit', function (event) {
-    var form = event.target;
-    event.preventDefault();
-    var submitter = event.submitter;
-    var action = (submitter && submitter.getAttribute('formaction')) || form.getAttribute('action') || '/';
-    var method = ((submitter && submitter.getAttribute('formmethod')) || form.getAttribute('method') || 'get').toUpperCase();
-
-    if (method === 'GET') {
-      var qs = new URLSearchParams();
-      new FormData(form).forEach(function (value, key) { qs.append(key, value); });
-      var s = qs.toString();
-      navigate(action + (s ? '?' + s : ''));
+      readForm();
+      var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next; store.set('theme', next); draw();
+      var b = document.querySelector('[data-theme-toggle]'); if (b) b.focus();
       return;
     }
-
-    var params = paramsFromForm(form, submitter);
-    // „Als Datei“ braucht keinen Server: der Jira-Text steht schon im Formular.
-    if (action === '/ticket/text') {
-      download('ticket.txt', (params.markup || [''])[params.markup ? params.markup.length - 1 : 0]);
+    if (el.hasAttribute('data-example') && S.ctx) { var ex = S.ctx.examples[+el.getAttribute('data-example')]; if (ex) { S.form.text = ex.text; draw(); run(); } return; }
+    if (el.hasAttribute('data-recent')) {
+      var r = recent()[+el.getAttribute('data-recent')];
+      if (!r) return;
+      S.form.text = r.text; S.form.modus = r.modus === 'wunsch' ? 'wunsch' : 'pruefen';
+      if (S.path !== '/abgleich') { location.hash = '#/abgleich'; }
+      else { draw(); run(); }
       return;
     }
-    if (form.dataset.pending) return;
-    form.dataset.pending = 'true';
-    form.setAttribute('aria-busy', 'true');
-    var before = submitter && submitter.innerHTML;
-    var isTicket = action === '/ticket' || action === '/ticket/pruefen';
-    if (submitter) { submitter.disabled = true; if (isTicket && submitter.textContent.trim()) submitter.textContent = 'Wird geprüft …'; }
-    load('POST', action, params, null, { keepScroll: isTicket, focus: isTicket ? 't-text' : null })
-      .catch(function (err) {
-        var notice = form.querySelector('.request-error');
-        if (!notice) { notice = document.createElement('p'); notice.className = 'request-error'; notice.setAttribute('role', 'alert'); form.appendChild(notice); }
-        notice.textContent = (err.message || String(err)) + ' Deine Eingaben bleiben erhalten. Bitte erneut versuchen.';
-      })
-      .finally(function () {
-        if (!document.body.contains(form)) return;
-        delete form.dataset.pending;
-        form.removeAttribute('aria-busy');
-        if (submitter) { submitter.disabled = false; submitter.innerHTML = before; }
-      });
+    if (el.hasAttribute('data-copy')) { var m = document.getElementById('markup'); if (m) copyText(m.textContent, el); return; }
+    if (el.hasAttribute('data-recalc')) { S.busy = true; draw(); load('/daten', { neu: ['1'] }); return; }
+    if (el.hasAttribute('data-retry')) { load(S.path); }
+  });
+  window.addEventListener('hashchange', function () {
+    var p = location.hash.replace(/^#/, '');
+    readForm();
+    load(p === '/daten' ? '/daten' : '/abgleich');
   });
 
-  // ------------------------------------------------------------ Bug-Erklärung (nur auf Anfrage)
-
-  function generateExplanation(button) {
-    if (button.disabled) return;
-    var output = button.closest('dialog').querySelector('.rca-explanation-text');
-    var label = button.textContent;
-    button.disabled = true;
-    button.textContent = 'Erklärung wird erstellt …';
-    output.setAttribute('aria-busy', 'true');
-    callServer('POST', button.getAttribute('data-rca-generate'), {}).then(function (res) {
-      if (res.fatal) throw new Error(res.fatal);
-      var data = res.json || {};
-      if (res.status !== 200) throw new Error(data.error || 'Erklärung konnte nicht erstellt werden.');
-      output.textContent = (data.generated ? 'KI-Erklärung · anhand der verfügbaren Befunde\n\n' : '') + data.text;
-    }).catch(function (err) {
-      output.textContent = err.message;
-    }).finally(function () {
-      button.disabled = false;
-      button.textContent = label;
-      output.removeAttribute('aria-busy');
-    });
-  }
-
-  // ------------------------------------------------------------ Monatsverlauf (Übersicht)
-
-  var chartState = { active: { created: true, resolved: true }, series: [] };
-  var chartObserver = null;
-
-  function toggleSeries(button) {
-    var kind = button.getAttribute('data-series');
-    var active = chartState.active;
-    if (!(kind in active) || (active[kind] && !active[kind === 'created' ? 'resolved' : 'created'])) return;
-    active[kind] = !active[kind];
-    button.setAttribute('aria-pressed', active[kind] ? 'true' : 'false');
-    renderChart();
-  }
-
-  function drawChart(ctx) {
-    if (chartObserver) { chartObserver.disconnect(); chartObserver = null; }
-    var node = document.getElementById('year-chart');
-    if (!node) return;
-    chartState.active = { created: true, resolved: true };
-    chartState.series = Array.isArray(ctx.series) ? ctx.series.slice(0, 12) : [];
-    renderChart();
-    if (typeof ResizeObserver !== 'undefined') {
-      var lastWidth = node.clientWidth;
-      chartObserver = new ResizeObserver(function () {
-        if (Math.abs(node.clientWidth - lastWidth) < 1) return;
-        lastWidth = node.clientWidth;
-        renderChart();
-      });
-      chartObserver.observe(node);
-    }
-  }
-
-  function renderChart() {
-    var node = document.getElementById('year-chart');
-    if (!node) return;
-    var months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-    var active = chartState.active;
-    var ns = 'http://www.w3.org/2000/svg';
-    function element(tag, attributes, parent) {
-      var el = document.createElementNS(ns, tag);
-      Object.keys(attributes).forEach(function (key) { el.setAttribute(key, attributes[key]); });
-      parent.appendChild(el);
-      return el;
-    }
-    var width = Math.max(300, Math.round(node.clientWidth)), height = 150;
-    var left = 32, right = width - 12, top = 7, bottom = 121;
-    var values = chartState.series.map(function (d) {
-      return { created: Math.max(0, Number(d.created) || 0), resolved: Math.max(0, Number(d.resolved) || 0) };
-    });
-    var max = Math.max.apply(null, [1].concat(values.reduce(function (acc, d) { return acc.concat([d.created, d.resolved]); }, [])));
-    var gridMax = Math.ceil(max / 4) * 4;
-    function x(index) { return left + (right - left) * index / 11; }
-    function y(value) { return bottom - (bottom - top) * value / gridMax; }
-    node.replaceChildren();
-    var svg = element('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'img', 'aria-label': 'Jira-Tickets nach Erstellungs- und Lösungsmonat' }, node);
-    var title = element('title', {}, svg); title.textContent = 'Erstellte und gelöste Jira-Tickets im Jahresverlauf';
-    for (var tick = 0; tick <= 4; tick++) {
-      var value = gridMax * tick / 4;
-      var yy = y(value);
-      element('line', { x1: left, x2: right, y1: yy, y2: yy, 'class': 'gridline' }, svg);
-      var label = element('text', { x: 3, y: yy + 4, 'class': 'axis-label' }, svg); label.textContent = value;
-    }
-    months.forEach(function (month, index) {
-      if (width < 550 && index % 2 && index !== 11) return;
-      var label = element('text', { x: x(index), y: 144, 'text-anchor': 'middle', 'class': 'axis-label' }, svg); label.textContent = month;
-    });
-    ['created', 'resolved'].forEach(function (kind) {
-      if (!active[kind] || values.length === 0) return;
-      var line = 'M ' + x(0) + ' ' + y(values[0][kind]);
-      // Gerade Strecken zwischen den Monatswerten: eine Kurve würde Werte zwischen den Monaten erfinden.
-      values.slice(1).forEach(function (d, offset) { line += ' L ' + x(offset + 1) + ' ' + y(d[kind]); });
-      element('path', { d: line + ' L ' + x(values.length - 1) + ' ' + bottom + ' L ' + x(0) + ' ' + bottom + ' Z', 'class': 'area-' + kind }, svg);
-      element('path', { d: line, 'class': 'line-' + kind }, svg);
-      values.forEach(function (d, index) {
-        var point = element('circle', { cx: x(index), cy: y(d[kind]), r: 9, fill: 'transparent' }, svg);
-        var tooltip = element('title', {}, point); tooltip.textContent = months[index] + ': ' + d[kind] + (kind === 'created' ? ' erstellt' : ' gelöst');
-      });
-      var last = values.length - 1;
-      element('circle', { cx: x(last), cy: y(values[last][kind]), r: 3.5, 'class': 'end-' + kind }, svg);
-    });
-  }
-
-  // ------------------------------------------------------------ Start
-
-  // Seiten-Cache gehört einer Person: andere Anmeldung im selben Browser, alles weg.
-  if (read('pc-user') !== (window.VIEWER || '')) { pcClear(); store('pc-user', window.VIEWER || ''); }
-  var start = window.START_PATH && window.START_PATH.charAt(0) === '/' ? window.START_PATH : hashPath();
-  if (start !== hashPath()) navigate(start); else load('GET', start);
+  load(window.BOOT ? window.BOOT.path : (location.hash.replace(/^#/, '') === '/daten' ? '/daten' : '/abgleich'));
 })();
 </script>

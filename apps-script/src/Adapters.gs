@@ -24,17 +24,21 @@
 /**
  * Nur-Lesen-Sperre, fest im Code (keine Skripteigenschaft kann sie lockern): Jira, Confluence, ServiceNow und jede
  * andere Adresse bekommen ausschließlich GET. Ausnahmen: Vertex AI (Gemini und Embeddings), das Anfragen technisch
- * per POST erwartet, und der Abfrage-Endpunkt von BigQuery (nur für den eigenen Datensatz, siehe BigQuery.gs).
+ * per POST erwartet, der Reranker von Vertex (Ranking API, genau eine Adresse) und der Abfrage-Endpunkt von BigQuery
+ * (nur für den eigenen Datensatz, siehe BigQuery.gs).
  * Jeder HTTP-Aufruf der App läuft hier durch (requestJson und das parallele Einbetten in Vertex.gs).
  */
 var READ_ONLY_POST_HOST_ = /^https:\/\/([a-z0-9-]+-)?aiplatform\.googleapis\.com\//;
 // BigQuery: nur der Abfrage-Endpunkt. Was dort laufen darf (nur der eigene Datensatz), prüft assertOwnDataset_ in BigQuery.gs.
 var BIGQUERY_QUERY_URL_ = /^https:\/\/bigquery\.googleapis\.com\/bigquery\/v2\/projects\/[a-z0-9.:-]+\/queries$/;
+// Reranker (Vertex AI Ranking API): nur die Methode „rank“. Sie bewertet Texte und ändert nichts.
+var RANKING_URL_ = /^https:\/\/discoveryengine\.googleapis\.com\/v1\/projects\/[a-z0-9.:-]+\/locations\/global\/rankingConfigs\/default_ranking_config:rank$/;
 function assertReadOnly_(method, url) {
   var m = String(method || '').toUpperCase();
   if (m === 'GET') return;
   if (m === 'POST' && READ_ONLY_POST_HOST_.test(String(url))) return;
   if (m === 'POST' && BIGQUERY_QUERY_URL_.test(String(url))) return;
+  if (m === 'POST' && RANKING_URL_.test(String(url))) return;
   throw new WriteDisabled('Nur-Lesen-Sperre: ' + m + ' an ' + String(url).split('?')[0].replace(/^(https?:\/\/[^/]+).*$/, '$1') + ' ist verboten.');
 }
 
@@ -343,7 +347,7 @@ ConfluenceRest.prototype.pages = function () {
       try {
         rows = data.results;
         rows.forEach(function (r) {
-          result.push({ id: String(r.id), title: r.title, body: stripHtml(r.body.storage.value), space: space, url: base + r._links.webui });
+          result.push({ id: String(r.id), title: r.title, body: htmlToText_(r.body.storage.value).slice(0, RAG_PAGE_CHARS_), space: space, url: base + r._links.webui });
         });
       } catch (exc) {
         throw new SourceUnavailable('Confluence-Antwort unerwartet: ' + exc.message);

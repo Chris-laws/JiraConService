@@ -1,6 +1,6 @@
 // Oberflächen-Prüfung im echten Browser (Playwright/Chromium):  node apps-script/dev/ui-check.js
 //
-// Alle Seiten, hell und dunkel, bei 1440, 1024 und 390 px Breite:
+// Alle Zustände (Start, Prüfen, Wunsch, Fehler, Daten), hell und dunkel, bei 1440, 1024 und 375 px Breite:
 //   xss       Testdaten und Eingaben enthalten HTML/Skript; nichts davon darf ausgeführt oder als Element erscheinen
 //   js        keine Skriptfehler im Browser
 //   text      keine Schrift unter 11 px
@@ -22,21 +22,10 @@ try { ({ chromium } = require('playwright')); } catch (e) {
 }
 
 const EVIL = '<img src=x onerror="window.__xss=1"><script>window.__xss=1</script>"\'><svg onload="window.__xss=1">';
-const PAGES = ['/', '/ticket', '/tickets', '/meine-tickets', '/admin', '/wissen', '/bugs', '/bugs/INC0041871', '/streams',
-  '/dokumente', '/releases', '/tickets?q=' + encodeURIComponent(EVIL), '/wissen?frage=' + encodeURIComponent(EVIL), '/gibt-es-nicht'];
-const WIDTHS = [1440, 1024, 390];
+const WIDTHS = [1440, 1024, 375];
 
 // Ausnahmen, je mit Grund. Schlüssel: Regel + CSS-Selektor des Elements.
-const ALLOW = {
-  'contrast span.brand-y': 'Wortmarke: „Align“ in der Markenfarbe Gelb, Logo statt Fließtext',
-  'contrast .tl span': 'Lebenszyklus: Beschriftung steht unter dem Punkt, die Messung nimmt fälschlich die Punktfarbe als Grund',
-  'contrast .gp b': 'Häkchen/Kreuz als Statuszeichen neben dem Text, kein eigener Text',
-  'text a.ai-cta': 'Handy: Knopf zeigt nur das Symbol (Schrift 0), Name über aria-label',
-  'text a.board-new': 'Handy: Knopf zeigt nur das Symbol (Schrift 0), Name über aria-label',
-  'surface div.board-donut': 'Kreisdiagramm (conic-gradient) ist Daten, keine Fläche',
-  'surface div.ring': 'Konfidenz-Ring (conic-gradient) ist Daten, keine Fläche',
-  'surface div.ring > span': 'Innenfläche des Konfidenz-Rings',
-};
+const ALLOW = {};
 
 function startServer() {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
@@ -81,7 +70,7 @@ function audit() {
   };
   const key = (el) => {
     const parent = el.parentElement;
-    return [sel(el), parent ? sel(parent) + ' > ' + sel(el) : '', el.closest('.tl') ? '.tl span' : '', el.closest('.gp') ? '.gp b' : ''].filter(Boolean);
+    return [sel(el), parent ? sel(parent) + ' > ' + sel(el) : ''].filter(Boolean);
   };
   const vis = (el) => { const b = el.getBoundingClientRect(); const s = getComputedStyle(el); return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
   const parse = (c) => { const m = c.match(/[\d.]+/g); if (!m) return null; return { rgb: m.slice(0, 3).map(Number), a: m[3] === undefined ? 1 : +m[3] }; };
@@ -151,63 +140,63 @@ function audit() {
   for (const theme of ['light', 'dark']) for (const w of WIDTHS) runs.push({ theme, w, lang: 'de' });
   runs.push({ theme: 'light', w: 1440, lang: 'en' });
   let pagesChecked = 0;
+  const check = async (page, where) => {
+    await page.waitForTimeout(150);
+    for (const [rule, keys, msg] of await page.evaluate(audit)) note(rule, keys, where, msg);
+    pagesChecked++;
+  };
   for (const { theme, w, lang } of runs) {
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
-    await ctx.addInitScript((t) => { try { localStorage.setItem('theme', t); } catch (e) { /* egal */ } }, theme);
+    await ctx.addInitScript(([t, l]) => { try { localStorage.setItem('theme', t); localStorage.setItem('lang', l); } catch (e) { /* egal */ } }, [theme, lang]);
     const page = await ctx.newPage();
-    page.on('pageerror', (e) => note('js', ['window'], `${theme} ${w}`, e.message));
-    page.on('dialog', (d) => { note('xss', ['dialog'], `${theme} ${w}`, 'Dialog geöffnet: ' + d.message()); d.dismiss(); });
+    const tag = `${theme} ${w}${lang === 'en' ? ' en' : ''}`;
+    page.on('pageerror', (e) => note('js', ['window'], tag, e.message));
+    page.on('dialog', (d) => { note('xss', ['dialog'], tag, 'Dialog geöffnet: ' + d.message()); d.dismiss(); });
+    // Start: leere Seite mit Eingabe
     await page.goto(base, { waitUntil: 'networkidle' });
-    if (lang === 'en') {
-      await page.evaluate(() => google.script.run.withSuccessHandler(() => {}).apiRequest('POST', '/sprache', { lang: 'en' }));
-      await page.waitForTimeout(300);
-    }
-    for (const path of PAGES) {
-      await page.goto(base + '#' + path, { waitUntil: 'networkidle' });
-      await page.waitForSelector('main.sheet', { timeout: 8000 }).catch(() => note('js', ['main'], `${theme} ${w} ${path}`, 'Seite wurde nicht gezeichnet'));
-      await page.waitForTimeout(250);
-      for (const [rule, keys, msg] of await page.evaluate(audit)) note(rule, keys, `${path} ${theme} ${w}${lang === 'en' ? ' en' : ''}`, msg);
-      pagesChecked++;
-    }
-    // Eingaben: Ticketentwurf und Wissensfrage mit bösartigem Text abschicken
-    for (const [path, field] of [['/ticket', 'textarea'], ['/wissen', 'textarea, input[name="frage"]']]) {
-      await page.goto(base + '#' + path, { waitUntil: 'networkidle' });
-      const box = page.locator(field).first();
-      if (await box.count()) {
-        await box.fill('Bestellvorschlag Feiertage ' + EVIL);
-        await box.press(field.startsWith('textarea') ? 'Control+Enter' : 'Enter').catch(() => {});
-        await page.locator('form:has(' + field.split(',')[0] + ') [type=submit]').first().click({ timeout: 2000 }).catch(() => {});
-        await page.waitForTimeout(700);
-        for (const [rule, keys, msg] of (await page.evaluate(audit)).filter((r) => r[0] === 'xss')) note(rule, keys, `${path} Eingabe`, msg);
+    await page.waitForSelector('#composer', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Startseite wurde nicht gezeichnet'));
+    await check(page, 'Start ' + tag);
+    // Prüfen: Treffer aus den (bösartig präparierten) Testdaten, Eingabe selbst ebenfalls bösartig
+    await page.fill('#text', 'Bestellvorschlag Feiertage Wareneingang Teillieferungen ' + EVIL);
+    await page.press('#text', 'Control+Enter');
+    await page.waitForSelector('#h-verdict', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Ergebnis wurde nicht gezeichnet'));
+    if (!(await page.locator('.hit').count())) note('js', ['.hit'], tag, 'keine Treffer gezeichnet');
+    await check(page, 'Prüfen ' + tag);
+    // Wunsch: Stream, Entwurf, Vorbilder
+    await page.check('input[value=wunsch]', { force: true });
+    await page.fill('#text', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen sichtbar bleiben. ' + EVIL);
+    await page.click('#composer button[type=submit]');
+    await page.waitForSelector('#markup', { timeout: 8000 }).catch(() => note('js', ['#markup'], tag, 'Entwurf wurde nicht gezeichnet'));
+    await check(page, 'Wunsch ' + tag);
+    // Zu kurze Eingabe: Fehlermeldung
+    await page.fill('#text', 'kurz');
+    await page.click('#composer button[type=submit]');
+    await page.waitForSelector('#result [role=alert]', { timeout: 8000 }).catch(() => note('js', ['alert'], tag, 'Fehlermeldung fehlt'));
+    await check(page, 'Fehler ' + tag);
+    // Daten
+    await page.goto(base + '#/daten', { waitUntil: 'networkidle' });
+    await page.waitForSelector('#h-advice', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Datenseite wurde nicht gezeichnet'));
+    await check(page, 'Daten ' + tag);
+    // Tastatur: Umschalter und Knöpfe sind mit Tab erreichbar und zeigen einen Fokusring
+    if (w === 1440 && theme === 'light' && lang === 'de') {
+      await page.goto(base, { waitUntil: 'networkidle' });
+      await page.waitForSelector('#composer');
+      const seen = new Set();
+      for (let i = 0; i < 16; i++) {
+        await page.keyboard.press('Tab');
+        seen.add(await page.evaluate(() => { const a = document.activeElement; const s = getComputedStyle(a); const lab = a.closest('label');
+          const ring = s.outlineStyle !== 'none' || (lab && [...lab.querySelectorAll('span'), lab].some((x) => getComputedStyle(x).outlineStyle !== 'none'));
+          return (a.name || a.id || a.className || a.tagName) + (ring ? '' : ' OHNE-RING'); }));
       }
+      for (const need of ['modus', 'text', 'quelle']) if (![...seen].some((x) => x.startsWith(need))) note('a11y', ['tab'], tag, 'mit Tab nicht erreichbar: ' + need);
+      [...seen].filter((x) => / OHNE-RING$/.test(x)).forEach((x) => note('a11y', ['focus'], tag, 'kein Fokusring: ' + x));
     }
-    await ctx.close();
-  }
-  // Laden: Neuladen zeigt den letzten Stand sofort, die eine Startanfrage trägt die Kennung und bekommt nur {same};
-  // ?perf=1 zeigt die Messtafel.
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    const page = await ctx.newPage();
-    page.on('pageerror', (e) => note('js', ['window'], 'laden', e.message));
-    const calls = [], answers = [];
-    page.on('request', (r) => { if (r.url().endsWith('/api')) calls.push(JSON.parse(r.postData() || '[]')); });
-    page.on('response', async (r) => { if (r.url().endsWith('/api')) { try { answers.push(JSON.parse((await r.json()).result)); } catch (e) { /* egal */ } } });
-    await page.goto(base + '?perf=1#/tickets', { waitUntil: 'networkidle' });
-    calls.length = 0; answers.length = 0;
-    await page.reload({ waitUntil: 'networkidle' });
-    await page.waitForTimeout(300);
-    const start = calls.filter((c) => c[1] === '/tickets');
-    if (start.length !== 1) note('laden', ['boot'], '/tickets', `Neuladen schickt ${start.length} Anfragen für die Seite statt einer`);
-    else if (!start[0][2]._etag) note('laden', ['etag'], '/tickets', 'Neuladen fragt ohne Kennung (etag) nach');
-    if (!answers.some((a) => a.same)) note('laden', ['same'], '/tickets', 'unveränderte Seite kam nicht als {same}');
-    if (!(await page.locator('main.sheet .appbar-title').count())) note('laden', ['cache'], '/tickets', 'Seite nach Neuladen nicht gezeichnet');
-    if (!/api \/tickets \d+ ms/.test(await page.locator('#perf-panel').innerText().catch(() => ''))) note('laden', ['perf'], '/tickets', '?perf=1 zeigt keine Messtafel');
     await ctx.close();
   }
   await browser.close();
   server.close();
   const list = [...found.values()];
-  console.log(`${pagesChecked} Seitenansichten geprüft (${PAGES.length} Seiten, hell/dunkel, ${WIDTHS.join('/')} px, Englisch)`);
+  console.log(`${pagesChecked} Seitenansichten geprüft (Start, Prüfen, Wunsch, Fehler, Daten; hell/dunkel, ${WIDTHS.join('/')} px, Englisch)`);
   if (!list.length) { console.log('Keine Befunde'); return; }
   for (const f of list) console.log(`${f.rule.padEnd(8)} ${f.sel} ${f.msg}  [${f.where.slice(0, 3).join(', ')}${f.where.length > 3 ? ' …' : ''}]`);
   process.exitCode = 1;

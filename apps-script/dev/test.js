@@ -405,42 +405,36 @@ test('KI-Tageslimit je Person: danach Regel-Logik mit Hinweis', () => {
   assert.strictEqual(call(other, 'GET', '/wissen', { frage: ['Bestellvorschlag Feiertage'] }).ctx.answer.source, 'gemini', 'andere Person hat eigenes Limit');
 });
 
-test('Seite ohne Kommentare (minify): Vorlagen liefern Zeichen für Zeichen dasselbe HTML, Skripte sind gültig', () => {
+test('Seite ohne Kommentare (minify): Skripte bleiben gültig, die Oberfläche zeichnet gekürzt dasselbe', () => {
   const fs = require('fs');
   const path = require('path');
   const vm = require('vm');
   const { stripHtml, stripJs } = require('./minify');
   const SRC = path.join(__dirname, '..', 'src');
-  const script = (html) => /<script>([\s\S]*)<\/script>/.exec(html)[1];
-  const load = (strip) => {
-    const sandbox = { MARK_SRC: 'mark.svg', URLSearchParams, Intl, Date, Math, JSON };
-    vm.createContext(sandbox);
-    for (const f of ['JsI18n', 'JsHelpers', 'JsTemplates']) {
-      const html = fs.readFileSync(path.join(SRC, f + '.html'), 'utf8');
-      vm.runInContext(script(strip ? stripHtml(html) : html), sandbox);
-    }
-    return sandbox;
-  };
-  const a = load(false), b = load(true);
-  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
-  const pages = PAGES.map(([m, p]) => call(rt, m, p)).concat([call(rt, 'GET', '/ticket', { beispiel: ['1'] }), call(rt, 'GET', '/wissen', { frage: ['Bestellvorschlag'] })]);
-  let n = 0;
-  for (const res of pages) {
-    for (const lang of ['de', 'en']) {
-      // Jede Fassung bekommt eine eigene Kopie: manche Vorlagen sortieren Listen im Kontext um.
-      const copy = () => JSON.parse(JSON.stringify(Object.assign({}, res.ctx, { lang, query_string: '' })));
-      const ca = copy(), cb = copy();
-      a.CTX = ca; b.CTX = cb;
-      assert.strictEqual(b.TEMPLATES[res.template](cb), a.TEMPLATES[res.template](ca), res.template + ' ' + lang);
-      n++;
-    }
-  }
-  assert.ok(n >= 20);
   for (const f of fs.readdirSync(SRC).filter((x) => x.endsWith('.html'))) {
     const out = stripHtml(fs.readFileSync(path.join(SRC, f), 'utf8'));
     (out.match(/<script>([\s\S]*?)<\/script>/g) || []).forEach((s) => new vm.Script(s.slice(8, -9).replace(/<\?!?=[\s\S]*?\?>/g, '0'), { filename: f }));
     assert.ok(!/<!--/.test(out), f + ' enthält noch HTML-Kommentare');
   }
+  // JsApp in einer kleinen Nachbildung des Browsers laufen lassen: volle und gekürzte Fassung zeichnen dasselbe HTML.
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const ctx = call(rt, 'POST', '/abgleich', { text: ['Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können.'], modus: ['wunsch'] });
+  const drawn = (strip) => {
+    const html = fs.readFileSync(path.join(SRC, 'JsApp.html'), 'utf8');
+    const code = /<script>([\s\S]*)<\/script>/.exec(strip ? stripHtml(html) : html)[1];
+    const app = { innerHTML: '', addEventListener: () => {} };
+    const sandbox = { MARK_SRC: 'mark.svg', JSON, Math, Promise, setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, FormData: function () {},
+      localStorage: { getItem: () => null, setItem: () => {} }, location: { hash: '' }, navigator: {},
+      document: { getElementById: (id) => (id === 'app' ? app : null), documentElement: { dataset: { theme: 'light' } }, querySelector: () => null, activeElement: null },
+      window: { APP_NAME: 'ReqAlign', addEventListener: () => {}, BOOT: { path: '/abgleich', promise: { then: (fn) => { const r = fn(JSON.stringify(ctx)); return { then: (g) => { g(r); return { catch: () => {} }; } }; } } } } };
+    sandbox.google = undefined;
+    vm.createContext(sandbox);
+    vm.runInContext(code, sandbox);
+    return app.innerHTML;
+  };
+  const full = drawn(false);
+  assert.ok(/ADF-1021/.test(full) && /id="markup"/.test(full) && /h-verdict/.test(full), full.slice(0, 300));
+  assert.strictEqual(drawn(true), full);
   assert.strictEqual(stripJs("var a = 1 / 2; // x\nvar r = /\\/\\/[^/]*/g; /* y */ var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;"),
     "var a = 1 / 2;\nvar r = /\\/\\/[^/]*/g;  var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;");
 });
@@ -463,6 +457,7 @@ test('Gebündelte Fassung (bundle/) ist aktuell und rechnet gleich', () => {
 // ---------- BigQuery (Nachbildung: erkennt jede Anweisung an ihrem „-- op:“-Etikett) ----------
 
 function fakeBigQuery(db, calls) {
+  db.chunks = db.chunks || [];
   const T = (d) => (d ? String(new Date(d).getTime() / 1000) : null);
   const out = (fields, rows) => ({ code: 200, text: JSON.stringify({ jobComplete: true,
     schema: { fields: fields.map(([name, type, mode]) => ({ name, type, mode: mode || 'NULLABLE' })) },
@@ -471,6 +466,7 @@ function fakeBigQuery(db, calls) {
   const ISSUE = [['key', 'STRING'], ['summary', 'STRING'], ['description', 'STRING'], ['status', 'STRING'], ['reporter', 'STRING'],
     ['updated', 'TIMESTAMP'], ['url', 'STRING'], ['stream', 'STRING'], ['epic', 'STRING'], ['issue_type', 'STRING'],
     ['created', 'TIMESTAMP'], ['resolved', 'TIMESTAMP'], ['board_scope', 'STRING']];
+  const quant = (values, n) => { const v = values.slice().sort((x, y) => x - y); return Array.from({ length: n + 1 }, (_, i) => (v.length ? v[Math.min(v.length - 1, Math.floor((i / n) * v.length))] : 0)); };
   return (url, req) => {
     const body = JSON.parse(req.payload);
     const p = {};
@@ -482,6 +478,8 @@ function fakeBigQuery(db, calls) {
     const table = /-(issues|pages)$/.exec(op);
     const keyCol = table && table[1] === 'issues' ? 'key' : 'id';
     const rows = table ? db[table[1]] : null;
+    const titleOf = (r) => (table[1] === 'issues' ? r.summary : r.title) || '';
+    const bodyOf = (r) => (table[1] === 'issues' ? r.description : r.body) || '';
     if (op === 'schema') return out([], []);
     if (op === 'state-read') return out([['source', 'STRING'], ['mark', 'TIMESTAMP'], ['last_run', 'TIMESTAMP'], ['last_full', 'TIMESTAMP'],
       ['ok', 'BOOL'], ['note', 'STRING'], ['row_count', 'INT64']], Object.values(db.state));
@@ -494,35 +492,75 @@ function fakeBigQuery(db, calls) {
     if (op.startsWith('merge-')) {
       JSON.parse(p.rows).forEach((r) => {
         const old = rows.find((x) => x[keyCol] === r[keyCol]);
-        const has = r.embedding.length > 0;
-        const row = Object.assign({}, r, { synced_at: p.run, embedding: has ? r.embedding : old ? old.embedding : [],
-          emb_model: has ? r.emb_model : old ? old.emb_model : r.emb_model, text_hash: r.text_hash });
+        const row = Object.assign({}, r, { synced_at: p.run, emb_model: r.emb_model === null ? (old ? old.emb_model : null) : r.emb_model });
         if (old) Object.assign(old, row); else rows.push(row);
       });
       return out([], []);
     }
     if (op.startsWith('prune-')) { const keep = JSON.parse(p.keys); db[table[1]] = rows.filter((r) => keep.includes(r[keyCol])); return out([], []); }
+    if (op === 'chunks-delete') { const ids = JSON.parse(p.ids); db.chunks = db.chunks.filter((c) => !(c.source === p.source && ids.includes(c.doc_id))); return out([], []); }
+    if (op === 'chunks-insert') { JSON.parse(p.rows).forEach((r) => db.chunks.push(Object.assign({}, r, { synced_at: p.run }))); return out([], []); }
+    if (op === 'chunks-prune') { const keep = JSON.parse(p.keys); db.chunks = db.chunks.filter((c) => c.source !== p.source || keep.includes(c.doc_id)); return out([], []); }
     if (op.startsWith('backfill-')) {
-      return out([['k', 'STRING'], ['text', 'STRING']], rows.filter((r) => !r.text_hash || r.emb_model !== p.model).slice(0, +p.n)
-        .map((r) => ({ k: r[keyCol], text: table[1] === 'issues' ? (r.summary || '') + '. ' + (r.description || '') : (r.title || '') + '. ' + (r.body || '') })));
+      return out([['k', 'STRING'], ['title', 'STRING'], ['body', 'STRING']], rows.filter((r) => !r.text_hash || r.emb_model !== p.marker).slice(0, +p.n)
+        .map((r) => ({ k: r[keyCol], title: titleOf(r), body: bodyOf(r) })));
     }
-    if (op.startsWith('embed-')) {
-      JSON.parse(p.rows).forEach((x) => { const r = rows.find((y) => y[keyCol] === x.k); if (r) Object.assign(r, { embedding: x.embedding, emb_model: x.emb_model, text_hash: x.text_hash }); });
+    if (op.startsWith('mark-')) {
+      JSON.parse(p.rows).forEach((x) => { const r = rows.find((y) => y[keyCol] === x.k); if (r) Object.assign(r, { emb_model: p.marker, text_hash: x.text_hash }); });
       return out([], []);
     }
     if (op === 'search-issues') return out(ISSUE, db.issues.filter((r) => r.in_search));
     if (op === 'dashboard-issues') return out(ISSUE, db.issues.filter((r) => r.in_country || r.in_search)
       .map((r) => Object.assign({}, r, { stream: r.in_country ? null : r.stream, board_scope: r.in_country ? 'adfcr' : r.board_scope || r.stream })));
     if (op === 'pages') return out([['id', 'STRING'], ['title', 'STRING'], ['body', 'STRING'], ['space', 'STRING'], ['url', 'STRING']], db.pages);
-    if (op === 'vector-search') {
-      const dotp = (a, b) => a.reduce((s, x, i) => s + x * b[i], 0);
-      const cand = db.issues.filter((r) => r.in_search).map((r) => ({ source: 'jira', id: r.key, title: r.key + ': ' + r.summary, url: r.url,
-        snippet: (r.summary + '. ' + r.description).slice(0, +p.len), payload: JSON.stringify({ status: r.status, stream: r.stream, epic: r.epic }), e: r.embedding, m: r.emb_model }))
-        .concat(db.pages.map((r) => ({ source: 'confluence', id: r.id, title: r.title, url: r.url, snippet: (r.title + '. ' + r.body).slice(0, +p.len),
-          payload: JSON.stringify({ space: r.space }), e: r.embedding, m: r.emb_model })))
-        .filter((r) => r.m === p.model && r.e.length === +p.dim).map((r) => Object.assign(r, { score: dotp(r.e, p.q) }))
-        .sort((a, b) => b.score - a.score).slice(0, +p.k);
-      return out([['source', 'STRING'], ['id', 'STRING'], ['title', 'STRING'], ['url', 'STRING'], ['snippet', 'STRING'], ['payload', 'STRING'], ['score', 'FLOAT64']], cand);
+    if (op === 'docs-by-id') {
+      const keys = JSON.parse(p.keys);
+      return out([['id', 'STRING'], ['title', 'STRING'], ['body', 'STRING']], db.issues.filter((r) => keys.includes(r.key)).map((r) => ({ id: r.key, title: r.summary, body: r.description })));
+    }
+    if (op === 'hybrid-search') {
+      // Rechnet wie die Abfrage: BM25 über die Wortstämme, Kosinus über die Vektoren, je Weg die besten @pool, RRF.
+      const sources = JSON.parse(p.sources), terms = p.terms ? JSON.parse(p.terms) : [];
+      const pool = db.chunks.filter((c) => sources.includes(c.source));
+      const tfs = pool.map((c) => { const tf = {}; c.terms.forEach((x) => { if (terms.includes(x)) tf[x] = (tf[x] || 0) + 1; }); return tf; });
+      const df = {}; tfs.forEach((tf) => Object.keys(tf).forEach((x) => { df[x] = (df[x] || 0) + 1; }));
+      const avgdl = pool.reduce((s, c) => s + c.n_terms, 0) / (pool.length || 1) || 1;
+      const rank = (list) => list.sort((x, y) => y.score - x.score || (x.c.chunk_id < y.c.chunk_id ? -1 : 1)).slice(0, +p.pool).map((x, i) => Object.assign(x, { r: i + 1 }));
+      const lex = /lexr AS/.test(body.query) ? rank(pool.map((c, i) => ({ c, cov: Object.keys(tfs[i]).length / +p.nq,
+        score: Object.keys(tfs[i]).reduce((s, x) => s + Math.log(1 + (pool.length - df[x] + 0.5) / (df[x] + 0.5)) * tfs[i][x] * 2.2 / (tfs[i][x] + 1.2 * (0.25 + 0.75 * c.n_terms / avgdl)), 0) }))
+        .filter((x) => x.cov > 0)) : [];
+      const dotp = (x, y) => x.reduce((s, v, i) => s + v * y[i], 0);
+      const vec = /vecr AS/.test(body.query) ? rank(pool.filter((c) => c.emb_model === p.model && c.embedding.length === +p.dim).map((c) => ({ c, score: dotp(c.embedding, p.q) }))) : [];
+      const fused = new Map();
+      lex.forEach((x) => fused.set(x.c.chunk_id, { c: x.c, rrf: 1 / (+p.rrf + x.r), lex: x.score, cov: x.cov, vec: null }));
+      vec.forEach((x) => { const f = fused.get(x.c.chunk_id) || { c: x.c, rrf: 0, lex: null, cov: 0, vec: null }; f.rrf += 1 / (+p.rrf + x.r); f.vec = x.score; fused.set(x.c.chunk_id, f); });
+      const res = [...fused.values()].sort((x, y) => y.rrf - x.rrf || (x.c.chunk_id < y.c.chunk_id ? -1 : 1)).slice(0, +p.k).map((f) => {
+        const i = f.c.source === 'jira' ? db.issues.find((r) => r.key === f.c.doc_id) : null;
+        const pg = f.c.source === 'confluence' ? db.pages.find((r) => r.id === f.c.doc_id) : null;
+        return { chunk_id: f.c.chunk_id, source: f.c.source, doc_id: f.c.doc_id, chunk_no: f.c.chunk_no, heading: f.c.heading, text: f.c.text, rrf: f.rrf, lex: f.lex,
+          cov: f.cov, vec: f.vec, title: i ? i.summary : pg ? pg.title : null, url: i ? i.url : pg ? pg.url : null, status: i ? i.status : null,
+          stream: i ? i.stream : null, epic: i ? i.epic : null, space: pg ? pg.space : null, updated: i ? i.updated : null };
+      });
+      return out([['chunk_id', 'STRING'], ['source', 'STRING'], ['doc_id', 'STRING'], ['chunk_no', 'INT64'], ['heading', 'STRING'], ['text', 'STRING'],
+        ['rrf', 'FLOAT64'], ['lex', 'FLOAT64'], ['cov', 'FLOAT64'], ['vec', 'FLOAT64'], ['title', 'STRING'], ['url', 'STRING'], ['status', 'STRING'],
+        ['stream', 'STRING'], ['epic', 'STRING'], ['space', 'STRING'], ['updated', 'TIMESTAMP']], res);
+    }
+    if (op === 'eda-issues' || op === 'eda-pages') {
+      const seen = new Set(rows.map((r) => titleOf(r).trim().toLowerCase()));
+      return out([['docs', 'INT64'], ['empty', 'INT64'], ['dup_titles', 'INT64'], ['q', 'INT64', 'REPEATED']],
+        [{ docs: rows.length, empty: rows.filter((r) => !bodyOf(r).trim()).length, dup_titles: rows.length - seen.size, q: quant(rows.map((r) => bodyOf(r).length), 100) }]);
+    }
+    if (op.startsWith('eda-sample-')) return out([['title', 'STRING'], ['body', 'STRING']], rows.slice(0, +p.n).map((r) => ({ title: titleOf(r), body: bodyOf(r).slice(0, +p.cap) })));
+    if (op === 'eda-groups') {
+      const res = [];
+      const tally = (kind, list, key) => { const m = {}; list.forEach((r) => { const k = r[key] || '(ohne)'; m[k] = (m[k] || 0) + 1; }); Object.keys(m).forEach((k) => res.push({ kind, name: k, n: m[k] })); };
+      tally('stream', db.issues, 'stream'); tally('status', db.issues, 'status'); tally('space', db.pages, 'space');
+      return out([['kind', 'STRING'], ['name', 'STRING'], ['n', 'INT64']], res);
+    }
+    if (op === 'eda-chunks') {
+      return out([['source', 'STRING'], ['chunks', 'INT64'], ['docs', 'INT64'], ['embedded', 'INT64'], ['q', 'INT64', 'REPEATED']], ['jira', 'confluence'].map((s) => {
+        const mine = db.chunks.filter((c) => c.source === s);
+        return { source: s, chunks: mine.length, docs: new Set(mine.map((c) => c.doc_id)).size, embedded: mine.filter((c) => c.embedding.length).length, q: quant(mine.map((c) => c.text.length), 4) };
+      }).filter((r) => r.chunks));
     }
     throw new Error('Unbekannte BigQuery-Anweisung: ' + op);
   };
@@ -533,7 +571,7 @@ const EXPORT_HTML = (title, body) => `<html><head><title>ADINT : ${title}</title
   `<div id="main-content" class="wiki-content group"><p>${body}</p></div><div class="pageSection group">Anhänge</div></body></html>`;
 
 function bqWorld(extra) {
-  const db = { issues: [], pages: [], state: {} };
+  const db = { issues: [], pages: [], chunks: [], state: {} };
   const log = [], calls = [];
   const systems = fakeSystems(log);
   const bq = fakeBigQuery(db, calls);
@@ -560,7 +598,11 @@ test('BigQuery-Abgleich: Jira und Confluence-Export landen mit Vektoren im eigen
   assert.ok(report.ok, JSON.stringify(report));
   assert.deepStrictEqual(rt.__triggers.map((t) => [t.fn, t.minutes]), [['abgleich', 15]]);
   assert.deepStrictEqual(db.issues.map((i) => [i.key, i.in_search, i.in_country]).sort(), [['ADF-1', true, false], ['ADFCR-7', false, true]]);
-  assert.ok(db.issues.every((i) => i.embedding.length === 8 && i.emb_model === 'text-multilingual-embedding-002'));
+  const MARK = 'text-multilingual-embedding-002|v1|1200|150';
+  assert.ok(db.issues.every((i) => i.text_hash && i.emb_model === MARK), JSON.stringify(db.issues.map((i) => [i.text_hash, i.emb_model])));
+  assert.deepStrictEqual(db.chunks.map((c) => c.chunk_id).sort(), ['confluence:123456#0', 'confluence:Leitfaden#0', 'jira:ADF-1#0', 'jira:ADFCR-7#0']);
+  assert.ok(db.chunks.every((c) => c.embedding.length === 8 && c.emb_model === 'text-multilingual-embedding-002' && c.terms.length === c.n_terms && c.n_terms > 0));
+  assert.ok(db.chunks.find((c) => c.doc_id === 'ADFCR-7').terms.includes('feiertag'), 'Wortstämme aus Titel und Text');
   assert.deepStrictEqual(db.pages.map((p) => [p.id, p.title, p.space]).sort(), [['123456', 'Feiertagslogik', 'ADINT'], ['Leitfaden', 'Leitfaden Tickets', 'ADINT']]);
   assert.strictEqual(db.pages.find((p) => p.id === '123456').body, 'Feiertage je Land werden im Bestellvorschlag berücksichtigt & gepflegt.');
   assert.strictEqual(db.pages.find((p) => p.id === '123456').url, 'https://wiki.firma.de/pages/viewpage.action?pageId=123456');
@@ -604,7 +646,7 @@ test('BigQuery-Modus: Seiten lesen aus BigQuery, Suche rechnet dort (nur die Anf
   assert.ok(ans.sources.some((s) => s.source === 'confluence' && s.id === '123456'), JSON.stringify(ans.sources.map((s) => s.id)));
   const embeds = log.filter((l) => /:predict$/.test(l.url)).map((l) => JSON.parse(l.req.payload).instances.length);
   assert.deepStrictEqual(embeds, [1, 1], 'Verbindungstest und die Frage, sonst nichts');
-  assert.ok(calls.some((c) => c.op === 'vector-search'));
+  assert.ok(calls.some((c) => c.op === 'hybrid-search'));
   const admin = call(rt, 'GET', '/admin').ctx;
   assert.ok(admin.checks.some((c) => c[0] === 'Abgleich Jira' && c[1] === true), JSON.stringify(admin.checks));
 });
@@ -626,7 +668,7 @@ test('BigQuery-Sperre: nur eigener Datensatz, kein DROP/TRUNCATE/ALTER, eine Anw
 });
 
 test('BigQuery-Abgleich: fällt Jira aus, läuft Confluence trotzdem; der Stand nennt den Fehler', () => {
-  const db = { issues: [], pages: [], state: {} };
+  const db = { issues: [], pages: [], chunks: [], state: {} };
   const drive = { ordner1: [{ name: 'Seite_555.html', updated: new Date('2026-11-01T08:00:00Z'), text: EXPORT_HTML('Seite', 'Inhalt der Seite') }] };
   const rt = createRuntime({ scriptProperties: BQ, email: 'chris@firma.de', drive,
     fetch: (url, req) => (url.indexOf('jira.firma.de') >= 0 ? { code: 503, text: '' } : url.startsWith('https://bigquery.googleapis.com/')
@@ -691,6 +733,12 @@ test('Confluence-Knopf (startet)', () => {
     assert.ok(!/<|x\(\)/.test(JSON.parse(sandbox.__blob).pages[0].body), 'nur Text, ohne HTML und Skript');
     assert.deepStrictEqual(JSON.parse(JSON.stringify(pages[0])), { id: '1000', title: 'Seite 0', body: 'Text 0 & mehr', space: 'ADF', url: 'https://wiki.firma.de/wiki/pages/viewpage.action?pageId=1000' });
     assert.ok(/href="javascript:/.test(page('ADF')) && !/<script/i.test(page('ADF').replace(/&lt;script/g, '')));
+    // Als Lesezeichen steht der Code in einer Zeile: er muss dann noch gültig sein (kein Zeilenkommentar frisst den Rest).
+    const href = /href="(javascript:[^"]+)"/.exec(page('ADF'))[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&quot;/g, '"');
+    const oneLine = decodeURIComponent(href.slice('javascript:'.length));
+    assert.ok(!/\n/.test(oneLine));
+    new vmod.Script(oneLine);
+    assert.ok(/await fetch\(/.test(oneLine) && /a\.click\(\)/.test(oneLine), 'Code vollständig');
     console.log('ok   Confluence-Knopf: liest im Browser nur mit GET (alle Seiten), Datei wird von der App gelesen');
   }).catch((err) => { failed += 1; console.log('FAIL Confluence-Knopf\n     ' + (err.stack || err)); }));
 });
@@ -715,13 +763,276 @@ test('BigQuery-Abgleich: großer Bestand verteilt sich auf mehrere Läufe (Budge
   const embedded = () => log.filter((l) => /:predict$/.test(l.url)).reduce((n, l) => n + JSON.parse(l.req.payload).instances.length, 0);
   rt.abgleichEinrichten();
   assert.strictEqual(db.pages.length, 30, 'alle Seiten gespeichert');
-  assert.strictEqual(db.pages.filter((p) => p.embedding.length).length, 8, '10 Vektoren je Lauf, 2 davon für Jira');
+  assert.strictEqual(db.chunks.filter((c) => c.source === 'confluence' && c.embedding.length).length, 8, '10 Vektoren je Lauf, 2 davon für Jira');
+  assert.strictEqual(db.pages.filter((p) => p.text_hash).length, 8, 'Fingerabdruck nur, wo die Chunks geschrieben sind');
   for (let i = 0; i < 4; i++) rt.abgleich();
-  assert.strictEqual(db.pages.filter((p) => p.embedding.length && p.text_hash).length, 30, 'nach weiteren Läufen alles da');
+  assert.strictEqual(db.pages.filter((p) => p.text_hash).length, 30, 'nach weiteren Läufen alles da');
+  assert.strictEqual(db.chunks.filter((c) => c.source === 'confluence' && c.embedding.length).length, 30);
   const total = embedded();
   rt.abgleichVoll();
   assert.strictEqual(embedded() - total, 0, 'Vollabgleich bettet nichts erneut ein');
   assert.ok(/Seiten/.test(rt.syncSummary_({ ok: true, jira: 1, confluence: 30, embedded: 0, notes: [] })));
+});
+
+// ---------- Abgleich: Chunking, Hybrid-Suche, Reranker, Streams, Datenanalyse ----------
+
+test('Chunking: trennt an Überschriften, legt kleine Abschnitte zusammen, teilt lange mit Überlappung', () => {
+  const rt = createRuntime({});
+  const cfg = { chars: 400, overlap: 60 };
+  const jira = 'Vorwort zum Ticket.\nh3. 1. Ziel\nAls Disponent möchte ich Feiertage sehen.\n# erster Punkt\n# zweiter Punkt\nh3. 2. Mehrwert\nWeniger Abschriften.';
+  const secs = rt.sections_(jira, 'jira');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(secs.map((s) => [s.path, s.text]))), [['', 'Vorwort zum Ticket.'],
+    ['1. Ziel', 'Als Disponent möchte ich Feiertage sehen.\n# erster Punkt\n# zweiter Punkt'], ['2. Mehrwert', 'Weniger Abschriften.']], '„# “ ist in Jira eine Liste, keine Überschrift');
+  const small = rt.chunkDoc_({ source: 'jira', title: 'Feiertage', body: jira }, cfg);
+  assert.strictEqual(small.length, 1, 'kurzes Ticket bleibt ein Chunk');
+  assert.ok(small[0].embed_text.startsWith('Feiertage\n') && /2\. Mehrwert\nWeniger Abschriften\./.test(small[0].text));
+  const long = 'h2. Regeln\n' + Array.from({ length: 30 }, (_, i) => 'Satz Nummer ' + i + ' beschreibt eine Regel für den Bestellvorschlag.').join(' ') + '\nh2. Ausnahmen\nKeine.';
+  const chunks = rt.chunkDoc_({ source: 'jira', title: 'Lang', body: long }, cfg);
+  assert.ok(chunks.length >= 4, String(chunks.length));
+  assert.ok(chunks.every((c) => c.text.length <= cfg.chars + cfg.overlap + 10), JSON.stringify(chunks.map((c) => c.text.length)));
+  assert.ok(chunks.slice(0, -1).every((c) => c.heading === 'Regeln'));
+  assert.ok(chunks[1].text.startsWith('… ') && chunks[0].text.includes(chunks[1].text.slice(2, 30)), 'Überlappung mit dem Ende des vorigen Stücks');
+  assert.ok(chunks.every((c) => c.embed_text.startsWith('Lang › ')), 'Titel und Überschrift stehen in jedem Chunk');
+  for (let i = 0; i < 30; i++) assert.ok(chunks.some((c) => c.text.includes('Satz Nummer ' + i + ' ')), 'kein Satz geht verloren: ' + i);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rt.chunkDoc_({ source: 'jira', title: 'Nur Titel', body: '' }, cfg))),
+    [{ chunk_no: 0, heading: '', text: '', embed_text: 'Nur Titel' }]);
+  const giant = rt.chunkDoc_({ source: 'confluence', title: 'X', body: 'wort '.repeat(40000) }, cfg);
+  assert.ok(giant.length <= 80, 'Obergrenze je Seite');
+});
+
+test('Confluence-HTML wird zu Text mit Aufbau: Überschriften, Absätze, Listen; verschachtelte Überschriften ergeben den Pfad', () => {
+  const rt = createRuntime({});
+  const text = rt.htmlToText_('<h1>Bestellung</h1><p>Erster   Absatz &amp; mehr.</p><h2>Feiertage</h2><ul><li>AT</li><li>CH</li></ul><script>x()</script><table><tr><td>a</td><td>b</td></tr></table>');
+  assert.strictEqual(text, '# Bestellung\n\nErster Absatz & mehr.\n\n## Feiertage\n\n- AT\n- CH\n\na | b');
+  assert.strictEqual(rt.htmlToText_('Zeile 1\n\n## Titel\nZeile 2 &amp; 3'), 'Zeile 1\n\n## Titel\nZeile 2 & 3', 'Text vom Knopf behält seine Zeilen');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(rt.sections_(text, 'confluence').map((s) => s.path))), ['Bestellung', 'Bestellung › Feiertage']);
+  assert.strictEqual(rt.htmlToText_(null), '');
+});
+
+const RANK_URL = 'https://discoveryengine.googleapis.com/v1/projects/mein-projekt-123/locations/global/rankingConfigs/default_ranking_config:rank';
+
+/** Welt mit BigQuery, mehreren Tickets (Streams/Epics) und einem Reranker nach Wahl. */
+function ragWorld(opts) {
+  opts = opts || {};
+  const w = bqWorld({ scriptProperties: Object.assign({}, BQ, opts.props || {}) });
+  const mk = (key, summary, description, comp, epic) => ({ key, fields: { summary, description, status: { name: 'NEW REQUIREMENT' },
+    reporter: { emailAddress: 'a@firma.de' }, updated: '2026-11-02T09:00:00.000+0100', created: '2026-11-01T09:00:00.000+0100', resolutiondate: null,
+    components: comp ? [{ name: comp }] : [], issuetype: { name: 'Story' }, customfield_10008: epic || null } });
+  w.board.length = 0;
+  w.board.push(
+    mk('ADFCR-7', 'Feiertage im Bestellvorschlag', 'h3. 1. Ziel\nLand AT braucht Feiertage im Bestellvorschlag.\nh3. 2. Mehrwert\nWeniger Abschriften an Feiertagen.', 'Disposition', 'ADF-100'),
+    mk('ADFCR-8', 'Bestellvorschlag an Feiertagen anpassen', 'h3. 1. Ziel\nFeiertage je Land im Bestellvorschlag berücksichtigen.\nh3. 2. Mehrwert\nKeine Überbestände.', 'Disposition', 'ADF-100'),
+    mk('ADFCR-9', 'Leergut Rücknahme', 'Pfandflaschen am Automaten zählen', 'Logistik', 'ADF-200'));
+  return w;
+}
+const withRanker = (w, handler, log) => {
+  const inner = w.rt.UrlFetchApp.fetch;
+  w.rt.UrlFetchApp.fetch = (url, req) => {
+    if (url.startsWith('https://discoveryengine.googleapis.com/')) {
+      log.push({ url, req });
+      const r = handler(JSON.parse(req.payload));
+      return { getResponseCode: () => r.code, getContentText: () => r.text, getHeaders: () => ({}) };
+    }
+    return inner(url, req);
+  };
+};
+const WISH = 'Wir brauchen im Bestellvorschlag die Feiertage je Land, damit an Feiertagen nicht zu viel bestellt wird.';
+
+test('Abgleich mit BigQuery: Hybrid-Suche (Stichwörter + Vektor) in einer Abfrage, Reranker ordnet, Treffer je Ticket', () => {
+  const w = ragWorld();
+  const ranks = [];
+  withRanker(w, (body) => ({ code: 200, text: JSON.stringify({ records: body.records.map((r) => ({ id: r.id, score: /ADFCR-8/.test(r.id) ? 0.97 : /ADFCR-7/.test(r.id) ? 0.9 : 0.02 })) }) }), ranks);
+  w.rt.abgleichEinrichten();
+  w.calls.length = 0; w.log.length = 0;
+  const ctx = call(w.rt, 'POST', '/abgleich', { text: [WISH] }).ctx;
+  assert.strictEqual(ctx.error, null);
+  const res = ctx.result;
+  assert.deepStrictEqual([res.search.lexical, res.search.vector, res.search.reranker], [true, true, 'ranking']);
+  assert.deepStrictEqual(res.hits.slice(0, 2).map((h) => h.id), ['ADFCR-8', 'ADFCR-7'], 'Reihenfolge vom Reranker');
+  assert.ok(res.hits.every((h) => ['duplicate', 'similar', 'related'].includes(h.level) && h.passages.length >= 1 && h.score >= 0 && h.score <= 100));
+  assert.ok(res.hits[0].by_keyword && res.hits[0].by_meaning);
+  const search = w.calls.filter((c) => c.op === 'hybrid-search');
+  assert.strictEqual(search.length, 1, 'eine Abfrage');
+  assert.ok(/lexr AS/.test(search[0].sql) && /vecr AS/.test(search[0].sql) && /FULL OUTER JOIN/.test(search[0].sql));
+  assert.ok(!/Feiertag|Bestellvorschlag/i.test(search[0].sql), 'Anfrage nur als Parameter');
+  assert.ok(JSON.parse(search[0].params.terms).includes('feiertag'));
+  // Reranker: genau die freigegebene Adresse, Google-Token, Projekt, Texte der Abschnitte
+  assert.strictEqual(ranks.length, 1);
+  assert.strictEqual(ranks[0].url, RANK_URL);
+  assert.strictEqual(ranks[0].req.headers['x-goog-user-project'], 'mein-projekt-123');
+  const sent = JSON.parse(ranks[0].req.payload);
+  assert.strictEqual(sent.model, 'semantic-ranker-default@latest');
+  assert.ok(sent.records.length >= 3 && sent.records.every((r) => r.id && r.title && r.content));
+  // Jira und Confluence wurden für die Suche nicht angefasst
+  assert.ok(!w.log.some((l) => /jira\.firma\.de|wiki\.firma\.de/.test(l.url)));
+});
+
+test('Abgleich: Streams und Epics kommen aus den ähnlichsten vorhandenen Tickets', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  w.rt.abgleichEinrichten();
+  const res = call(w.rt, 'POST', '/abgleich', { text: [WISH], modus: ['pruefen'] }).ctx.result;
+  assert.strictEqual(res.stream_basis, 'tickets');
+  assert.strictEqual(res.streams[0].id, 'disposition');
+  assert.strictEqual(res.streams[0].name, 'Disposition & Bestellung');
+  assert.ok(res.streams[0].share > 50 && res.streams[0].examples.includes('ADFCR-7'), JSON.stringify(res.streams));
+  assert.strictEqual(res.epics[0].id, 'ADF-100');
+  assert.strictEqual(res.draft, null, 'Entwurf nur im Modus Wunsch');
+  assert.strictEqual(res.search.reranker, 'none');
+});
+
+test('Wunsch: Entwurf im Aufbau der Vorgabemaske mit Stream und Epic, formuliert nach dem Vorbild ähnlicher Tickets', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  const inner = w.rt.UrlFetchApp.fetch;
+  const prompts = [];
+  w.rt.UrlFetchApp.fetch = (url, req) => {
+    if (/:generateContent$/.test(url)) {
+      prompts.push(JSON.parse(req.payload).contents[0].parts[0].text);
+      const text = JSON.stringify({ title: 'Feiertage je Land im Bestellvorschlag', role: 'Disponent', goal: 'Feiertage je Land sehen', benefit: 'weniger Überbestand',
+        acceptance_criteria: ['Feiertage je Land gepflegt'], priority: 'Mittel', open_questions: ['Welche Länder zuerst?'] });
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), getHeaders: () => ({}) };
+    }
+    return inner(url, req);
+  };
+  w.rt.abgleichEinrichten();
+  const res = call(w.rt, 'POST', '/abgleich', { text: [WISH + ' Kontakt: max@firma.at'], modus: ['wunsch'], country: ['AT'] }).ctx.result;
+  assert.strictEqual(res.draft.source, 'gemini');
+  assert.ok(/h3\. 1\. Ziel der Anforderung/.test(res.draft.markup) && /Land: AT/.test(res.draft.markup));
+  assert.ok(/Stream: Disposition & Bestellung/.test(res.draft.markup) && /Epic: ADF-100/.test(res.draft.markup), res.draft.markup);
+  assert.deepStrictEqual(res.draft.open_questions, ['Welche Länder zuerst?']);
+  assert.ok(res.guide.examples.length >= 2 && res.guide.examples[0].sections.includes('1. Ziel'), JSON.stringify(res.guide));
+  assert.ok(res.guide.sections.some((s) => s.name === '2. Mehrwert' && s.n >= 2));
+  assert.strictEqual(prompts.length, 1);
+  assert.ok(/So sind ähnliche, vorhandene Tickets formuliert/.test(prompts[0]) && /h3\. 1\. Ziel/.test(prompts[0]), 'Vorbilder im Prompt');
+  assert.ok(!/max@firma\.at/.test(prompts[0]) && /\[E-Mail\]/.test(prompts[0]), 'E-Mail-Adressen gehen nicht an die KI');
+});
+
+test('Reranker fällt aus: Gemini springt ein, sonst bleibt die Reihenfolge der Suche; der Hinweis nennt den Grund', () => {
+  const w = ragWorld();
+  const ranks = [];
+  withRanker(w, () => ({ code: 403, text: '{"error":{"message":"Discovery Engine API has not been used"}}' }), ranks);
+  const inner = w.rt.UrlFetchApp.fetch;
+  let gemini = 0;
+  w.rt.UrlFetchApp.fetch = (url, req) => {
+    if (/:generateContent$/.test(url)) {
+      gemini += 1;
+      const list = JSON.parse(req.payload).contents[0].parts[0].text;
+      const scores = {};
+      list.split('\n').forEach((l) => { const m = /^\[(\d+)\] /.exec(l); if (m) scores[m[1]] = /Leergut/.test(l) ? 99 : 5; });
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ scores }) }] } }] }), getHeaders: () => ({}) };
+    }
+    return inner(url, req);
+  };
+  w.rt.abgleichEinrichten();
+  const res = call(w.rt, 'POST', '/abgleich', { text: [WISH] }).ctx.result;
+  assert.strictEqual(res.search.reranker, 'gemini');
+  assert.ok(/Ranking API\) nicht erreichbar/.test(res.search.note) && /HTTP 403/.test(res.search.note), res.search.note);
+  assert.strictEqual(res.hits.find((h) => h.id === 'ADFCR-9').rerank, 0.99);
+  assert.strictEqual(gemini, 1);
+  call(w.rt, 'POST', '/abgleich', { text: [WISH] });
+  assert.strictEqual(ranks.length, 1, 'eine abgeschaltete API wird nicht bei jeder Suche erneut gefragt');
+  // Ohne Gemini-Antwort: Reihenfolge der Suche, kein Absturz
+  const w2 = ragWorld();
+  withRanker(w2, () => ({ code: 500, text: 'kaputt' }), []);
+  w2.rt.abgleichEinrichten();
+  const res2 = call(w2.rt, 'POST', '/abgleich', { text: [WISH] }).ctx.result;
+  assert.strictEqual(res2.search.reranker, 'none');
+  assert.ok(res2.hits.length >= 2 && /Gemini als Reranker nicht nutzbar/.test(res2.search.note), res2.search.note);
+});
+
+test('Sperre: beim Reranker ist nur die Methode rank frei, sonst bleibt alles gesperrt', () => {
+  const rt = createRuntime({ scriptProperties: LIVE, fetch: () => ({ code: 200, text: '{"records":[]}' }) });
+  rt.requestJson('POST', RANK_URL, { json: {} });
+  ['https://discoveryengine.googleapis.com/v1/projects/p/locations/global/collections/x/dataStores/y/documents',
+    RANK_URL.replace(':rank', ':delete'), RANK_URL + '/x', RANK_URL.replace('https://', 'https://evil.example/'),
+    'https://discoveryengine.googleapis.com.evil.example/v1/projects/p/locations/global/rankingConfigs/default_ranking_config:rank']
+    .forEach((u) => assert.throws(() => rt.requestJson('POST', u, { json: {} }), rt.WriteDisabled, u));
+  assert.throws(() => rt.requestJson('DELETE', RANK_URL, {}), rt.WriteDisabled);
+});
+
+test('Vertex fällt aus: die Suche läuft nur über Stichwörter weiter und sagt das', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  w.rt.abgleichEinrichten();
+  const inner = w.rt.UrlFetchApp.fetch;
+  w.rt.UrlFetchApp.fetch = (url, req) => (/:predict$/.test(url) ? { getResponseCode: () => 503, getContentText: () => '', getHeaders: () => ({}) } : inner(url, req));
+  w.rt.UrlFetchApp.fetchAll = (reqs) => reqs.map((r) => w.rt.UrlFetchApp.fetch(r.url, r));
+  w.rt.__cache.advance(99999);
+  w.calls.length = 0;
+  const ctx = call(w.rt, 'POST', '/abgleich', { text: [WISH] }).ctx;
+  assert.deepStrictEqual([ctx.result.search.lexical, ctx.result.search.vector], [true, false]);
+  assert.ok(ctx.result.hits.some((h) => h.id === 'ADFCR-8' && h.by_keyword && !h.by_meaning), JSON.stringify(ctx.result.hits.map((h) => [h.id, h.level])));
+  assert.ok(!ctx.result.hits.some((h) => h.level === 'duplicate'), 'ohne Vektor keine Aussage „Duplikat“');
+  assert.ok(!/vecr AS/.test(w.calls.find((c) => c.op === 'hybrid-search').sql));
+  assert.ok(ctx.notices.some((n) => /Vertex Embeddings nicht erreichbar/.test(n)));
+});
+
+test('Neue Chunk-Einstellung: alles wird neu zerlegt; geänderter Text ersetzt seine alten Chunks; gelöschte Tickets verschwinden', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  w.rt.abgleichEinrichten();
+  const before = w.db.chunks.length;
+  w.board[0].fields.description = 'h3. 1. Ziel\n' + 'Feiertage je Land sind wichtig für die Bestellung. '.repeat(60);
+  w.rt.abgleich();
+  const seven = w.db.chunks.filter((c) => c.doc_id === 'ADFCR-7');
+  assert.ok(seven.length >= 3 && seven.every((c) => c.embedding.length === 8), String(seven.length));
+  assert.deepStrictEqual(seven.map((c) => c.chunk_no).sort((a, b) => a - b), seven.map((_, i) => i), 'alte Chunks ersetzt, keine doppelten');
+  assert.strictEqual(w.db.chunks.length, before - 1 + seven.length);
+  // andere Größe → Kennung passt nicht mehr → der nächste Lauf zerlegt alles neu
+  const rt2 = createRuntime({ scriptProperties: Object.assign({}, BQ, { RERANKER: 'none', CHUNK_CHARS: '600', CHUNK_OVERLAP: '60' }), fetch: w.rt.UrlFetchApp.fetch.__raw || ((url, req) => { const r = w.rt.UrlFetchApp.fetch(url, req); return { code: r.getResponseCode(), text: r.getContentText() }; }), email: 'chris@firma.de', drive: { ordner1: [] } });
+  rt2.abgleichVoll();
+  assert.ok(w.db.issues.every((i) => i.emb_model === 'text-multilingual-embedding-002|v1|600|60' && i.text_hash), JSON.stringify(w.db.issues.map((i) => i.emb_model)));
+  assert.ok(w.db.chunks.filter((c) => c.doc_id === 'ADFCR-7').length > seven.length, 'kleinere Chunks, also mehr');
+  assert.ok(!w.db.chunks.some((c) => c.source === 'confluence'), 'Seiten, die nicht mehr im Ordner sind, verlieren ihre Chunks');
+  w.board.splice(2, 1);
+  rt2.abgleichVoll();
+  assert.ok(!w.db.chunks.some((c) => c.doc_id === 'ADFCR-9') && !w.db.issues.some((i) => i.key === 'ADFCR-9'));
+});
+
+test('Datenanalyse: Messwerte je Quelle und eine Chunking-Empfehlung, mit BigQuery und im Speicher', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  for (let i = 0; i < 12; i++) w.board.push({ key: 'ADFCR-' + (100 + i), fields: { summary: i < 2 ? 'Doppelter Titel' : 'Ticket ' + i,
+    description: i === 5 ? '' : 'h3. 1. Ziel\n' + 'Regel für die Filiale und den Bestand. '.repeat(20 + 6 * i) + '\nh3. 2. Mehrwert\nWeniger Aufwand.',
+    status: { name: i % 2 ? 'DONE' : 'NEW REQUIREMENT' }, reporter: { emailAddress: 'a@firma.de' }, updated: '2026-11-02T09:00:00.000+0100',
+    created: '2026-11-01T09:00:00.000+0100', resolutiondate: null, components: [{ name: 'Logistik' }], issuetype: { name: 'Story' } } });
+  w.rt.abgleichEinrichten();
+  w.calls.length = 0;
+  const ctx = call(w.rt, 'GET', '/daten').ctx;
+  assert.strictEqual(ctx.error, null);
+  const rep = ctx.report, jira = rep.sources.find((s) => s.source === 'jira');
+  assert.strictEqual(rep.mode, 'bigquery');
+  assert.deepStrictEqual([jira.docs, jira.empty, jira.dup_titles], [16, 1, 1]);
+  assert.ok(jira.len.p50 > 500 && jira.len.max > jira.len.p50 && jira.structure.with_headings > 80 && jira.structure.sample === 16, JSON.stringify(jira));
+  assert.ok(rep.advice.chars >= 600 && rep.advice.chars <= 1600 && rep.advice.chars % 100 === 0 && rep.advice.overlap > 0, JSON.stringify(rep.advice));
+  assert.ok(rep.advice.est_chunks >= 16 && rep.advice.lines.some((l) => /haben Überschriften: getrennt wird an den Überschriften/.test(l)));
+  assert.ok(rep.advice.lines.some((l) => /keinen Text/.test(l)) && rep.advice.lines.some((l) => /Titel, den es schon gibt/.test(l)));
+  assert.ok(rep.groups.stream.some((g) => g.name === 'logistik' && g.n === 13) && rep.groups.status.length >= 2);
+  assert.ok(rep.chunks.find((x) => x.source === 'jira').embedded >= 16);
+  assert.ok(ctx.sync.some((s) => s.source === 'jira' && s.ok));
+  ['eda-issues', 'eda-pages', 'eda-sample-issues', 'eda-groups', 'eda-chunks'].forEach((op) => assert.ok(w.calls.some((c) => c.op === op), op));
+  w.calls.length = 0;
+  call(w.rt, 'GET', '/daten');
+  assert.ok(!w.calls.some((c) => /^eda-/.test(c.op)), 'zweiter Aufruf kommt aus dem Cache');
+  call(w.rt, 'GET', '/daten', { neu: ['1'] });
+  assert.ok(w.calls.some((c) => c.op === 'eda-issues'), '?neu=1 rechnet neu');
+  assert.ok(/Empfehlung: CHUNK_CHARS = \d+, CHUNK_OVERLAP = \d+/.test(w.rt.datenanalyse()));
+  // im Speicher (Testdaten): dieselbe Auswertung ohne BigQuery
+  const mem = call(createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } }), 'GET', '/daten').ctx;
+  assert.strictEqual(mem.report.mode, 'memory');
+  assert.ok(mem.report.sources.find((s) => s.source === 'jira').docs > 20 && mem.report.advice.differs === false, 'kurze Tickets: Einstellung passt schon');
+});
+
+test('Abgleich im Speicher (Testdaten): Duplikat erkannt, Stream aus den Nachbarn, zu kurze Eingabe wird freundlich abgelehnt', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  const page = call(rt, 'GET', '/abgleich').ctx;
+  assert.ok(page.examples.length >= 3 && page.result === null && page.store === 'memory');
+  const ctx = call(rt, 'POST', '/abgleich', { text: [page.examples[2].text], modus: ['wunsch'], quelle: ['jira'] }).ctx;
+  assert.strictEqual(ctx.result.verdict.level, 'duplicate');
+  assert.strictEqual(ctx.result.hits[0].id, 'ADF-1021');
+  assert.ok(ctx.result.hits.every((h) => h.source === 'jira'), 'Quellenfilter');
+  assert.strictEqual(ctx.result.streams[0].id, 'logistik');
+  assert.ok(/h2\. /.test(ctx.result.draft.markup));
+  assert.strictEqual(call(rt, 'POST', '/abgleich', { text: ['zu kurz'] }).ctx.error, 'Bitte beschreibe das Anliegen in einem ganzen Satz.');
+  const none = call(rt, 'POST', '/abgleich', { text: ['Xylophon Quastenflosser Zeppelin Orgelpfeife'] }).ctx.result;
+  assert.strictEqual(none.verdict.level, 'new');
+  assert.ok(Array.isArray(rt.sucheTesten()));
 });
 
 Promise.all(pendingAsync).then(() => {

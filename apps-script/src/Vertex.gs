@@ -192,6 +192,25 @@ VertexEmbedder.prototype.embed = function (texts) {
   return vectors;
 };
 
+/**
+ * Reranker: Vertex AI Ranking API (Discovery Engine API im selben Projekt). Bekommt die Anfrage und die gefundenen
+ * Abschnitte und liefert je Abschnitt eine Relevanz von 0 bis 1. Nur diese eine Adresse ist dafür freigegeben
+ * (siehe assertReadOnly_). Im Cloud-Projekt nötig: Discovery Engine API aktiviert, Rolle „Discovery Engine Viewer“.
+ */
+function vertexRankUrl(project) {
+  return 'https://discoveryengine.googleapis.com/v1/projects/' + project + '/locations/global/rankingConfigs/default_ranking_config:rank';
+}
+function VertexRanker(project, model) { this.project = project; this.model = model || 'semantic-ranker-default@latest'; }
+/** records: [{id, title, content}] → {id: score}. */
+VertexRanker.prototype.rank = function (query, records) {
+  var data = requestJson('POST', vertexRankUrl(this.project), { headers: vertexHeaders(this.project), error: LlmUnavailable,
+    json: { model: this.model, query: String(query).slice(0, 2000), records: records, topN: records.length, ignoreRecordDetailsInResponse: true } });
+  if (!data || !Array.isArray(data.records)) throw new LlmUnavailable('Ranking-Antwort ohne Ergebnisliste');
+  var scores = {};
+  data.records.forEach(function (r) { if (r && r.id !== undefined && typeof r.score === 'number') scores[r.id] = r.score; });
+  return scores;
+};
+
 /** Zum Testen im Editor: prüft Token, Projekt und Modell mit einer kurzen Anfrage. */
 function testVertex() {
   var s = loadSettings();
@@ -200,4 +219,11 @@ function testVertex() {
   Logger.log('Gemini: ' + llm.generate('Antworte nur mit: OK'));
   var emb = new VertexEmbedder(s.vertexProjectId, s.vertexLocation, s.vertexEmbeddingModel);
   Logger.log('Embedding-Länge: ' + emb.embed(['Verbindungstest'])[0].length);
+  try {
+    var scores = new VertexRanker(s.vertexProjectId, s.rankingModel).rank('Feiertage im Bestellvorschlag',
+      [{ id: 'a', title: 'Bestellvorschlag', content: 'Feiertage je Land berücksichtigen' }, { id: 'b', title: 'Leergut', content: 'Rücknahme von Pfandflaschen' }]);
+    Logger.log('Reranker: a = ' + scores.a + ', b = ' + scores.b);
+  } catch (exc) {
+    Logger.log('Reranker nicht erreichbar (' + exc.message + '). Die App nutzt dann Gemini bzw. die Reihenfolge ohne Reranker.');
+  }
 }

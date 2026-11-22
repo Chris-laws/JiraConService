@@ -14,9 +14,15 @@
       if (!r.ok) throw new Error('Confluence antwortete mit HTTP ' + r.status);
       var d = await r.json();
       d.results.forEach(function (p) {
-        // Nur Text (ohne HTML), höchstens 6.000 Zeichen je Seite: so bleiben auch 10.000 Seiten handlich.
+        /* Nur Text (ohne HTML), aber mit Aufbau: Überschriften als „# Titel“, Absätze und Listenpunkte als Zeilen. Daran
+           trennt die App später die Abschnitte. Höchstens 40.000 Zeichen je Seite. Keine Zeilenkommentare in dieser
+           Datei: als Lesezeichen steht alles in einer Zeile. */
         var html = (p.body && p.body.storage && p.body.storage.value) || '';
-        var text = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000);
+        var text = html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/\s+/g, ' ')
+          .replace(/<h([1-6])[^>]*>/gi, function (m, n) { return '\n\n' + '######'.slice(0, +n) + ' '; }).replace(/<\/h[1-6]>/gi, '\n\n')
+          .replace(/<li[^>]*>/gi, '\n- ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|blockquote|pre|table|ul|ol)>/gi, '\n\n')
+          .replace(/<\/(div|tr|section)>/gi, '\n').replace(/<\/t[dh]>/gi, ' | ').replace(/<[^>]+>/g, ' ')
+          .replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 40000);
         pages.push({ id: String(p.id), title: p.title, space: space, body: text,
           url: location.origin + base + ((p._links && p._links.webui) || ''), updated: (p.version && p.version.when) || '' });
       });
@@ -24,7 +30,7 @@
       start += limit;
     }
     var day = new Date().toISOString().slice(0, 10);
-    var size = 2500, parts = Math.max(1, Math.ceil(pages.length / size)), names = [];
+    var size = 1000, parts = Math.max(1, Math.ceil(pages.length / size)), names = [];
     for (var k = 0; k < parts; k++) {
       var file = 'confluence-' + space + '-' + day + (parts > 1 ? '-teil' + (k + 1) : '') + '.json';
       var blob = new Blob([JSON.stringify({ format: 'confluence-pages', space: space, exported: new Date().toISOString(), part: k + 1, parts: parts,
