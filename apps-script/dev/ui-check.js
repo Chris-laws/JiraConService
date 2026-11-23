@@ -176,16 +176,25 @@ function audit() {
     await page.waitForSelector('#insp-title', { state: 'detached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Escape schließt den Detailbereich nicht'));
     // Wunsch: Stream, Entwurf, Vorbilder
     await page.click('label:has(input[value=wunsch])');
-    await page.fill('#text', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen sichtbar bleiben. ' + EVIL);
+    await page.fill('#text', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen sichtbar bleiben ' + EVIL +
+      '. Außerdem soll das Palettenetikett beim Wareneingang gescannt werden. Die offene Restmenge soll beim Lieferanten angefragt werden.');
     await page.click('#composer button[type=submit]');
     await page.waitForSelector('[data-draft]', { timeout: 8000 }).catch(() => note('js', ['[data-draft]'], tag, 'Entwurf wurde nicht gezeichnet'));
     await page.waitForTimeout(1200);
+    // Was ist wirklich neu? Punkte mit Beleg, neue Punkte markiert
+    const pts = await page.evaluate(() => { const last = [...document.querySelectorAll('.pts')].pop(); return last ? { n: last.querySelectorAll('.pt').length, fresh: last.querySelectorAll('.pt.is-new').length, marks: last.querySelectorAll('.pt-quote mark').length } : null; });
+    if (!pts || pts.n < 3 || !pts.fresh || !pts.marks) note('js', ['.pts'], tag, 'Punkte fehlen oder ohne Beleg: ' + JSON.stringify(pts));
     await page.click('[data-draft]');
     await page.waitForSelector('#insp .rich', { timeout: 8000 }).catch(() => note('js', ['.rich'], tag, 'Entwurf öffnet sich nicht'));
     await page.waitForTimeout(700);
     await check(page, 'Wunsch ' + tag);
     await page.click('#insp [data-insp-close]');
     await page.waitForSelector('#insp-title', { state: 'detached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Schließen-Knopf schließt den Detailbereich nicht'));
+    // Beleg eines Punkts öffnet die Quelle
+    await page.locator('.pts button.pt-ref').last().click();
+    await page.waitForSelector('#insp:not([hidden]) #insp-title', { timeout: 8000 }).catch(() => note('js', ['.pt-ref'], tag, 'Beleg öffnet die Quelle nicht'));
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#insp-title', { state: 'detached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Escape schließt die Quelle aus dem Beleg nicht'));
     // Zu kurze Eingabe: Hinweis unter dem Feld, keine Anfrage
     await page.fill('#text', 'kurz');
     await page.click('#composer button[type=submit]');

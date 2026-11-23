@@ -2636,18 +2636,174 @@ function ragAnalyse_(c, text, modus, opts) {
       scale: found.vector ? { similar: percent(th.similar), duplicate: percent(th.duplicate) } : null },
     verdict: { level: level, duplicates: n('duplicate'), similar: n('similar'), related: n('related'),
       top: level !== 'new' ? topOf_(hits, level) : null },
-    hits: hits, streams: streams, stream_basis: basis, epics: neighbourVote_(hits, 'epic'), draft: null, guide: null
+    hits: hits, streams: streams, stream_basis: basis, epics: neighbourVote_(hits, 'epic'), draft: null, guide: null,
+    points: wishPoints_(c, text, rr.rows, hits)
   };
   if (modus === 'wunsch') {
     var guide = writingGuide_(c, hits);
     var country = SETTINGS.countries.indexOf(opts.country) >= 0 ? opts.country : SETTINGS.countries[0];
-    var draft = c.ticketWriter.draft(text, country, guide.prompt);
+    // Der Entwurf beschreibt nur, was es noch nicht (ganz) gibt. Gibt es alles schon, bleibt der ganze Wunsch die Grundlage.
+    var fresh = out.points.items.filter(function (it) { return it.status !== 'exists'; });
+    var onlyNew = fresh.length > 0 && fresh.length < out.points.items.length;
+    var draft = c.ticketWriter.draft(onlyNew ? fresh.map(function (it) { return it.text.replace(/[.!?]*$/, '.'); }).join(' ') : text, country, guide.prompt);
     out.guide = { examples: guide.examples, sections: guide.sections };
     out.draft = { title: draft.title, source: draft.source, notice: draft.notice || '', open_questions: draft.open_questions, country: country,
-      markup: toJiraMarkup(draft, streams.length ? streams[0].name : '', out.epics.length ? out.epics[0].id : '') };
+      scope: { only_new: onlyNew, fresh: fresh.length, known: out.points.items.length - fresh.length },
+      markup: toJiraMarkup(draft, streams.length ? streams[0].name : '', out.epics.length ? out.epics[0].id : '') + scopeMarkup_(out.points) };
   }
   out.search.ms = Date.now() - started;
   return out;
+}
+
+// ---------- Was ist wirklich neu? Wunsch in Punkte zerlegen und jeden Punkt einzeln prüfen ----------
+
+var POINTS_MAX_ = 6;            // so viele Punkte je Wunsch höchstens
+var POINTS_LLM_ROWS_ = 15;      // so viele Abschnitte sieht Gemini beim Prüfen
+var POINT_QUOTE_CHARS_ = 220;   // Länge des belegenden Satzes
+var POINT_CUT_ = /(?:[.!?;]+(?=\s|$)\s*|\n+|:\s+|,?\s+(?:außerdem|zusätzlich|sowie|ferner|darüber hinaus)\s+)/i;
+var POINT_TAIL_ = /^(?:damit|weil|denn|sodass|so dass|um)\b/i;
+var POINT_STATUS_ = { vorhanden: 'exists', teilweise: 'partial', neu: 'new' };
+
+var POINTS_PROMPT_ = 'Zerlege den Wunsch in seine einzelnen fachlichen Punkte (höchstens ' + POINTS_MAX_ + '). Jeder Punkt ist ein kurzer Satz ' +
+  'in den Worten des Wunsches. Eine Begründung („damit …“) gehört zum Punkt davor und ist kein eigener Punkt.\n' +
+  'Prüfe dann für jeden Punkt, ob einer der nummerierten Abschnitte ihn schon beschreibt: "vorhanden" = ein Abschnitt beschreibt genau das, ' +
+  '"teilweise" = ein Abschnitt deckt nur einen Teil ab, "neu" = kein Abschnitt passt. Erfinde nichts.\n' +
+  'Bei "vorhanden" und "teilweise": Nummer des Abschnitts in "source" und den passenden Satz wörtlich aus dem Abschnitt in "quote" (höchstens 200 Zeichen).\n' +
+  'Antworte nur mit JSON: {"points": [{"text": "…", "status": "neu", "source": null, "quote": ""}]}\n' +
+  'Wunsch:\n"""{text}"""\nAbschnitte:\n{list}';
+
+function cleanPoint_(s) {
+  s = String(s || '').replace(/^\s*(?:[-*•–]|\d+[.)])\s+/, '').replace(/\s+/g, ' ').trim().replace(/[,;:]+$/, '');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+}
+
+/** Ohne KI: an Satzenden, Zeilen, Doppelpunkten und Wörtern wie „außerdem“ trennen; Begründungen und Bruchstücke anhängen. */
+var POINT_ABBR_ = /\b(?:[a-z]\.\s?[a-z]\.|(?:bzw|ca|ggf|inkl|evtl|usw|etc|nr|vgl|max|min|bspw|zzgl)\.)/gi;
+
+function splitPoints_(text) {
+  var out = [];
+  // Abkürzungen (z. B., bzw., ca.) sind kein Satzende: Punkte vorübergehend ersetzen.
+  var masked = String(text || '').replace(POINT_ABBR_, function (m) { return m.replace(/\./g, '\u2024'); });
+  masked.split(POINT_CUT_).map(function (s) { return cleanPoint_(s.replace(/\u2024/g, '.')); }).filter(String).forEach(function (part) {
+    var short = distinct_(tokens(part)).length < 2;
+    if (out.length && (short || POINT_TAIL_.test(part))) out[out.length - 1] += (POINT_TAIL_.test(part) ? ', ' + part.charAt(0).toLowerCase() + part.slice(1) : ' ' + part);
+    else out.push(part);
+  });
+  // Ein zu kurzer erster Teil (z. B. eine Überschrift vor dem Doppelpunkt) bleibt nur stehen, wenn er allein steht.
+  if (out.length > 1 && distinct_(tokens(out[0])).length < 2) out.splice(0, 2, out[0] + ': ' + out[1]);
+  return out.slice(0, POINTS_MAX_).map(function (p) { return p.length > 300 ? p.slice(0, 299) + '…' : p; });
+}
+
+function rowText_(r) { return [r.title, r.heading, r.text].filter(Boolean).join(' · '); }
+
+/** Der Satz eines Abschnitts, der am meisten Wörter des Punkts enthält (Beleg). */
+function quoteFor_(point, row) {
+  var want = tokenSet(point), best = '', bestN = 0;
+  String(row.text || '').split(/(?<=[.!?])\s+|\s*\n\s*/).forEach(function (s) {
+    var n = countIntersection(want, tokenSet(s));
+    if (n > bestN) { best = s.trim(); bestN = n; }
+  });
+  if (!best) return '';
+  return best.length > POINT_QUOTE_CHARS_ ? best.slice(0, POINT_QUOTE_CHARS_ - 1) + '…' : best;
+}
+
+function pointRef_(row, quote) {
+  return { id: row.doc_id, source: row.source, title: row.title || row.doc_id, url: row.url || '', heading: row.heading || '', quote: quote || '' };
+}
+
+/** Ohne KI: je Punkt der beste Abschnitt nach Bedeutung (Embedder) und Anteil der gefundenen Wörter. */
+function matchPointsOffline_(c, points, rows) {
+  var pool = rows.slice(0, RAG_RERANK_);
+  var vecs = null, th = thresholdsFor('default');
+  if (pool.length) {
+    try {
+      vecs = c.embedder.embed(points.concat(pool.map(rowText_)));
+      th = thresholdsFor(c.embedder.name);
+    } catch (exc) {
+      if (!(exc instanceof LlmUnavailable)) throw exc;
+      vecs = null;
+    }
+  }
+  var sets = pool.map(function (r) { return tokenSet(rowText_(r)); });
+  return points.map(function (p, i) {
+    var want = distinct_(tokens(p)), best = null;
+    pool.forEach(function (r, k) {
+      var cov = want.length ? want.filter(function (t) { return sets[k][t]; }).length / want.length : 0;
+      var sim = vecs ? dot(vecs[i], vecs[points.length + k]) : null;
+      var score = (sim === null ? 0 : sim / th.similar) + cov;
+      if (!best || score > best.score) best = { row: r, cov: cov, sim: sim, score: score };
+    });
+    // Streng: lieber „neu“ als ein schwacher Beleg. Bedeutung allein reicht nicht, es müssen auch Wörter des Punkts vorkommen.
+    var status = 'new';
+    if (best) {
+      var sim = best.sim === null ? -1 : best.sim, cov = best.cov, mid = (th.similar + th.duplicate) / 2;
+      if ((sim >= th.duplicate && cov >= 0.4) || (sim >= mid && cov >= 0.5) || (want.length >= 3 && cov >= 0.75)) status = 'exists';
+      else if ((sim >= mid && cov >= 0.3) || (sim >= th.similar && cov >= 0.5) || cov >= 0.5) status = 'partial';
+    }
+    return { text: p, status: status, ref: status === 'new' ? null : pointRef_(best.row, quoteFor_(p, best.row)) };
+  });
+}
+
+/** Mit KI: Gemini zerlegt und prüft in einem Aufruf. Zitate, die nicht wörtlich im Abschnitt stehen, fallen weg. */
+function matchPointsLlm_(c, text, rows) {
+  var top = rows.slice(0, POINTS_LLM_ROWS_);
+  var list = top.map(function (r, n) {
+    return '[' + (n + 1) + '] ' + r.title + (r.heading ? ' › ' + r.heading : '') + ': ' + String(r.text || '').replace(/\s+/g, ' ').slice(0, 500);
+  }).join('\n');
+  var prompt = POINTS_PROMPT_.replace('{text}', redact(text).slice(0, 3000)).replace('{list}', redact(list || '(keine)'));
+  var data = JSON.parse(c.llm.generate(prompt, true));
+  if (!data || !Array.isArray(data.points)) throw new TypeError('KI-Antwort ohne Punkte');
+  var flat = function (s) { return String(s || '').replace(/\s+/g, ' ').trim(); };
+  var items = data.points.slice(0, POINTS_MAX_).map(function (p) {
+    var pt = cleanPoint_(p && p.text).slice(0, 300);
+    if (!pt) return null;
+    var status = POINT_STATUS_[String(p.status || '').toLowerCase()] || 'new';
+    var row = top[Number(p.source) - 1];
+    if (status !== 'new' && !row) status = 'new';
+    if (status === 'new') return { text: pt, status: 'new', ref: null };
+    var quote = flat(p.quote).slice(0, POINT_QUOTE_CHARS_);
+    if (!quote || flat(row.text).indexOf(quote.replace(/…$/, '')) < 0) quote = quoteFor_(pt, row);
+    return { text: pt, status: status, ref: pointRef_(row, quote) };
+  }).filter(Boolean);
+  if (!items.length) throw new TypeError('KI-Antwort ohne Punkte');
+  return items;
+}
+
+/**
+ * Was ist wirklich neu? Liefert {method, items: [{text, status: exists|partial|new, ref, hit}], counts, note}.
+ * ref.hit ist die Nummer in hits (für den Sprung zur Quelle) oder -1.
+ */
+function wishPoints_(c, text, rows, hits) {
+  var method = 'offline', note = '', items = null;
+  if (c.llm.available && rows.length) {
+    try {
+      items = matchPointsLlm_(c, text, rows);
+      method = 'gemini';
+    } catch (exc) {
+      if (!(exc instanceof LlmUnavailable || exc instanceof SyntaxError || exc instanceof TypeError)) throw exc;
+      note = 'Zerlegen mit KI nicht möglich (' + exc.message + '); die Punkte wurden ohne KI bestimmt.';
+    }
+  }
+  if (!items) items = matchPointsOffline_(c, splitPoints_(text), rows);
+  var counts = { exists: 0, partial: 0, 'new': 0 };
+  items.forEach(function (it) {
+    counts[it.status] += 1;
+    if (it.ref) {
+      it.ref.hit = -1;
+      hits.forEach(function (h, i) { if (it.ref.hit < 0 && h.id === it.ref.id && h.source === it.ref.source) it.ref.hit = i; });
+    }
+  });
+  return { method: method, items: items, counts: counts, note: note };
+}
+
+/** Abgrenzung für den Ticket-Entwurf: was es schon gibt, mit Verweis. */
+function scopeMarkup_(points) {
+  var known = points.items.filter(function (it) { return it.ref; });
+  if (!known.length) return '';
+  return '\n\nh3. Abgrenzung (gibt es schon)\n' + known.map(function (it) {
+    var link = it.ref.url ? '[' + it.ref.id + '|' + it.ref.url + ']' : it.ref.id;
+    return '* ' + it.text + ': ' + (it.status === 'exists' ? 'vorhanden in ' : 'teilweise in ') + link + ' (' + it.ref.title + ')';
+  }).join('\n');
 }
 
 // ---------- Datenanalyse (EDA): Was steckt in den Daten, wie sollte man trennen? ----------
@@ -3546,7 +3702,8 @@ var EXAMPLES = [
   ['Gebindegröße nach Lieferantenwechsel', 'Bei Lieferantenwechsel soll die Gebindegröße im Artikelstamm aktualisiert werden. Der Bestellvorschlag ' +
     'soll die neue Gebindegröße bei der Bestellmenge nutzen, damit keine falschen Mengen bestellt werden.'],
   ['Teillieferungen im Wareneingang', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen ' +
-    'sichtbar bleiben.']
+    'sichtbar bleiben. Außerdem soll das Palettenetikett beim Wareneingang gescannt werden. Die offene Restmenge soll automatisch ' +
+    'als Nachlieferung beim Lieferanten angefragt werden.']
 ];
 
 /** Die Vorgabemaske, so wie sie im Formular steht. */

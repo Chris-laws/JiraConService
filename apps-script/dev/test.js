@@ -885,7 +885,7 @@ test('Wunsch: Entwurf im Aufbau der Vorgabemaske mit Stream und Epic, formuliert
   const inner = w.rt.UrlFetchApp.fetch;
   const prompts = [];
   w.rt.UrlFetchApp.fetch = (url, req) => {
-    if (/:generateContent$/.test(url)) {
+    if (/:generateContent$/.test(url) && !/einzelnen fachlichen Punkte/.test(req.payload)) {
       prompts.push(JSON.parse(req.payload).contents[0].parts[0].text);
       const text = JSON.stringify({ title: 'Feiertage je Land im Bestellvorschlag', role: 'Disponent', goal: 'Feiertage je Land sehen', benefit: 'weniger Überbestand',
         acceptance_criteria: ['Feiertage je Land gepflegt'], priority: 'Mittel', open_questions: ['Welche Länder zuerst?'] });
@@ -906,6 +906,66 @@ test('Wunsch: Entwurf im Aufbau der Vorgabemaske mit Stream und Epic, formuliert
   assert.ok(!/max@firma\.at/.test(prompts[0]) && /\[E-Mail\]/.test(prompts[0]), 'E-Mail-Adressen gehen nicht an die KI');
 });
 
+test('Was ist wirklich neu? Gemini zerlegt und prüft in einem Aufruf; erfundene Zitate und Quellen fallen weg', () => {
+  const w = ragWorld({ props: { RERANKER: 'none' } });
+  const inner = w.rt.UrlFetchApp.fetch;
+  const asked = [];
+  w.rt.UrlFetchApp.fetch = (url, req) => {
+    if (/:generateContent$/.test(url) && /einzelnen fachlichen Punkte/.test(req.payload)) {
+      const prompt = JSON.parse(req.payload).contents[0].parts[0].text;
+      asked.push(prompt);
+      const n = (prompt.match(/\[(\d+)\] Bestellvorschlag an Feiertagen anpassen/) || [])[1];
+      const text = JSON.stringify({ points: [
+        { text: 'Feiertage je Land im Bestellvorschlag', status: 'vorhanden', source: Number(n), quote: 'Steht so nirgends im Abschnitt.' },
+        { text: 'Leergut zählen', status: 'teilweise', source: 99, quote: 'x' },
+        { text: '  ', status: 'neu' },
+        { text: '- Push-Nachricht an die Filiale', status: 'neu', source: null }] });
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), getHeaders: () => ({}) };
+    }
+    return inner(url, req);
+  };
+  w.rt.abgleichEinrichten();
+  const res = call(w.rt, 'POST', '/abgleich', { text: [WISH + ' Außerdem eine Push-Nachricht an max@firma.at.'], modus: ['pruefen'] }).ctx.result;
+  assert.strictEqual(asked.length, 1, 'ein Aufruf für alle Punkte');
+  assert.ok(!/max@firma\.at/.test(asked[0]) && /\[E-Mail\]/.test(asked[0]), 'E-Mail-Adressen gehen nicht an die KI');
+  const p = res.points;
+  assert.strictEqual(p.method, 'gemini');
+  assert.deepStrictEqual(p.items.map((it) => it.status), ['exists', 'new', 'new'], JSON.stringify(p.items));
+  assert.deepStrictEqual(p.counts, { exists: 1, partial: 0, new: 2 });
+  const ref = p.items[0].ref;
+  assert.strictEqual(ref.id, 'ADFCR-8');
+  assert.ok(ref.quote && !/nirgends/.test(ref.quote) && /Feiertage/.test(ref.quote), 'erfundenes Zitat ersetzt: ' + ref.quote);
+  assert.ok(ref.hit >= 0 && res.hits[ref.hit].id === 'ADFCR-8', 'Sprung zur Quelle');
+  assert.strictEqual(p.items[1].ref, null, 'Quelle außerhalb der Liste: neu');
+  assert.strictEqual(p.items[2].text, 'Push-Nachricht an die Filiale');
+});
+
+test('Was ist wirklich neu? Ohne KI: Punkte aus Sätzen, Beleg je Punkt, Entwurf nur mit dem Neuen und Abgrenzung', () => {
+  const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
+  assert.deepStrictEqual([...rt.splitPoints_('Bestellvorschlag an Feiertagen: im Wareneingang sollen Teillieferungen berücksichtigt werden')],
+    ['Bestellvorschlag an Feiertagen', 'Im Wareneingang sollen Teillieferungen berücksichtigt werden']);
+  assert.deepStrictEqual([...rt.splitPoints_('Der Bestand soll sichtbar sein. Damit die Filiale planen kann.')], ['Der Bestand soll sichtbar sein, damit die Filiale planen kann']);
+  assert.deepStrictEqual([...rt.splitPoints_('Die Prognose z. B. je Filiale anzeigen und speichern')], ['Die Prognose z. B. je Filiale anzeigen und speichern']);
+  assert.strictEqual(rt.splitPoints_(Array.from({ length: 9 }, (_, i) => 'Punkt Nummer ' + i + ' soll gelten.').join(' ')).length, 6);
+  const page = call(rt, 'GET', '/abgleich').ctx;
+  const res = call(rt, 'POST', '/abgleich', { text: [page.examples[2].text], modus: ['wunsch'] }).ctx.result;
+  const p = res.points;
+  assert.strictEqual(p.method, 'offline');
+  assert.deepStrictEqual(p.items.map((it) => [it.status, it.ref && it.ref.id]), [['exists', 'ADF-1021'], ['exists', 'ADF-1059'], ['new', null]], JSON.stringify(p.items));
+  p.items.filter((it) => it.ref).forEach((it) => {
+    assert.ok(it.ref.quote.length > 20 && it.ref.hit >= 0 && res.hits[it.ref.hit].id === it.ref.id, JSON.stringify(it.ref));
+  });
+  assert.deepStrictEqual(res.draft.scope, { only_new: true, fresh: 1, known: 2 });
+  assert.ok(/Restmenge/.test(res.draft.title) && !/Palettenetikett/.test(res.draft.title), res.draft.title);
+  assert.ok(/h3\. Abgrenzung \(gibt es schon\)/.test(res.draft.markup) && /vorhanden in \[ADF-1021\|https:/.test(res.draft.markup), res.draft.markup);
+  // Gibt es alles schon: Grundlage bleibt der ganze Wunsch
+  const all = call(rt, 'POST', '/abgleich', { text: ['Bestellvorschlag an Feiertagen: im Wareneingang sollen Teillieferungen berücksichtigt werden'], modus: ['wunsch'] }).ctx.result;
+  assert.deepStrictEqual(all.draft.scope, { only_new: false, fresh: 0, known: 2 });
+  // Nichts gefunden: alles neu, kein Entwurf mit Abgrenzung
+  const none = call(rt, 'POST', '/abgleich', { text: ['Xylophon Quastenflosser Zeppelin Orgelpfeife'], modus: ['wunsch'] }).ctx.result;
+  assert.ok(none.points.items.every((it) => it.status === 'new' && it.ref === null) && !/Abgrenzung/.test(none.draft.markup));
+});
+
 test('Reranker fällt aus: Gemini springt ein, sonst bleibt die Reihenfolge der Suche; der Hinweis nennt den Grund', () => {
   const w = ragWorld();
   const ranks = [];
@@ -913,7 +973,7 @@ test('Reranker fällt aus: Gemini springt ein, sonst bleibt die Reihenfolge der 
   const inner = w.rt.UrlFetchApp.fetch;
   let gemini = 0;
   w.rt.UrlFetchApp.fetch = (url, req) => {
-    if (/:generateContent$/.test(url)) {
+    if (/:generateContent$/.test(url) && !/einzelnen fachlichen Punkte/.test(req.payload)) {
       gemini += 1;
       const list = JSON.parse(req.payload).contents[0].parts[0].text;
       const scores = {};

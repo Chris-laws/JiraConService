@@ -17,7 +17,8 @@ var EXAMPLES = [
   ['Gebindegröße nach Lieferantenwechsel', 'Bei Lieferantenwechsel soll die Gebindegröße im Artikelstamm aktualisiert werden. Der Bestellvorschlag ' +
     'soll die neue Gebindegröße bei der Bestellmenge nutzen, damit keine falschen Mengen bestellt werden.'],
   ['Teillieferungen im Wareneingang', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen ' +
-    'sichtbar bleiben.']
+    'sichtbar bleiben. Außerdem soll das Palettenetikett beim Wareneingang gescannt werden. Die offene Restmenge soll automatisch ' +
+    'als Nachlieferung beim Lieferanten angefragt werden.']
 ];
 
 /** Die Vorgabemaske, so wie sie im Formular steht. */
