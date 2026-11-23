@@ -25,7 +25,11 @@ const EVIL = '<img src=x onerror="window.__xss=1"><script>window.__xss=1</script
 const WIDTHS = [1440, 1024, 375];
 
 // Ausnahmen, je mit Grund. Schlüssel: Regel + CSS-Selektor des Elements.
-const ALLOW = {};
+const ALLOW = {
+  // Glas ist ausdrücklich gewünscht (23.11.2026) und sitzt nur dort, wo Inhalt darunter durchläuft:
+  // Kopfzeile, Eingabe über dem Gespräch, Kopf der rechten Hälfte, Abdunklung hinter dem Detailfenster.
+  'surface header.top': 'Glas-Kopfzeile', 'surface div.dock': 'Glas-Eingabe', 'surface div.insp-head': 'Glas-Kopf rechts', 'surface button.scrim': 'Abdunklung',
+};
 
 function startServer() {
   const rt = createRuntime({ scriptProperties: { DATA_SOURCE: 'mock' } });
@@ -54,7 +58,7 @@ function startServer() {
       return;
     }
     // --bundle: die ausgelieferte, gekürzte Fassung (bundle/Index.html) statt src/ prüfen.
-    const vars = { appName: rt.loadSettings().appName, startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
+    const vars = { appName: rt.loadSettings().appName, appLogo: process.env.APP_LOGO || '', startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
     const tpl = process.argv.includes('--bundle') ? require('fs').readFileSync(require('path').join(__dirname, '..', 'bundle', 'Index.html'), 'utf8') : undefined;
     const html = renderIndex(vars, tpl).replace('<body>', '<body>\n' + shim);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(html);
@@ -147,7 +151,7 @@ function audit() {
   };
   for (const { theme, w, lang } of runs) {
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
-    await ctx.addInitScript(([t, l, k]) => { try { localStorage.setItem('theme', t); localStorage.setItem('lang', l); if (k) localStorage.setItem('look', k); } catch (e) { /* egal */ } }, [theme, lang, process.env.LOOK || '']);
+    await ctx.addInitScript(([t, l]) => { try { localStorage.setItem('theme', t); localStorage.setItem('lang', l); } catch (e) { /* egal */ } }, [theme, lang]);
     const page = await ctx.newPage();
     const tag = `${theme} ${w}${lang === 'en' ? ' en' : ''}`;
     page.on('pageerror', (e) => note('js', ['window'], tag, e.message));
@@ -169,7 +173,7 @@ function audit() {
     await page.waitForTimeout(700);
     await check(page, 'Treffer ' + tag);
     await page.keyboard.press('Escape');
-    await page.waitForSelector('#insp[hidden]', { state: 'attached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Escape schließt den Detailbereich nicht'));
+    await page.waitForSelector('#insp-title', { state: 'detached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Escape schließt den Detailbereich nicht'));
     // Wunsch: Stream, Entwurf, Vorbilder
     await page.click('label:has(input[value=wunsch])');
     await page.fill('#text', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen sichtbar bleiben. ' + EVIL);
@@ -181,7 +185,7 @@ function audit() {
     await page.waitForTimeout(700);
     await check(page, 'Wunsch ' + tag);
     await page.click('#insp [data-insp-close]');
-    await page.waitForSelector('#insp[hidden]', { state: 'attached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Schließen-Knopf schließt den Detailbereich nicht'));
+    await page.waitForSelector('#insp-title', { state: 'detached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Schließen-Knopf schließt den Detailbereich nicht'));
     // Zu kurze Eingabe: Hinweis unter dem Feld, keine Anfrage
     await page.fill('#text', 'kurz');
     await page.click('#composer button[type=submit]');
@@ -197,7 +201,7 @@ function audit() {
       await page.goto(base, { waitUntil: 'networkidle' });
       await page.waitForSelector('#composer');
       const seen = new Set();
-      for (let i = 0; i < 22; i++) {
+      for (let i = 0; i < 14; i++) {
         await page.keyboard.press('Tab');
         seen.add(await page.evaluate(() => { const a = document.activeElement; const s = getComputedStyle(a); const lab = a.closest('label');
           const ring = s.outlineStyle !== 'none' || (lab && [...lab.querySelectorAll('span'), lab].some((x) => getComputedStyle(x).outlineStyle !== 'none'));

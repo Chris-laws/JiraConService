@@ -15,6 +15,7 @@ function doGet(e) {
   }
   var template = HtmlService.createTemplateFromFile('Index');
   template.appName = settings.appName;
+  template.appLogo = settings.appLogo;
   template.startPath = (e && e.parameter && e.parameter.seite) ? String(e.parameter.seite) : '';
   template.perf = !!(e && e.parameter && e.parameter.perf === '1');
   template.viewer = viewerKey_();

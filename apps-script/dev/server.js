@@ -9,7 +9,7 @@ const { createRuntime, renderIndex } = require('./runtime');
 
 // BUNDLE=1: die gebündelte Fassung aus bundle/ ausliefern (so wie sie per Copy-Paste in Apps Script landet).
 const BUNDLE = process.env.BUNDLE === '1';
-const BUNDLE_DIR = path.join(__dirname, '..', 'bundle');
+const BUNDLE_DIR = process.env.BUNDLE_DIR || path.join(__dirname, '..', 'bundle');
 
 const port = Number(process.argv[2] || process.env.PORT || 8790);
 const runtime = createRuntime({
@@ -61,7 +61,7 @@ http.createServer((req, res) => {
   }
   if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
     const settings = runtime.loadSettings();
-    const vars = { appName: settings.appName, startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
+    const vars = { appName: settings.appName, appLogo: process.env.APP_LOGO || settings.appLogo || '', startPath: '', perf: /[?&]perf=1(&|$)/.test(req.url), viewer: 'dev' };
     const html = (BUNDLE ? renderIndex(vars, fs.readFileSync(path.join(BUNDLE_DIR, 'Index.html'), 'utf8')) : renderIndex(vars)).replace('<body>', '<body>\n' + SHIM);
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(html);

@@ -7,7 +7,10 @@
 
   var TEXT = {
     de: {
-      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', fresh: 'Neue Anfrage', history: 'Verlauf', look: 'Variante', look_a: 'Studio: schwebende Flächen', look_b: 'Fokus: eine ruhige Fläche, Details als Fenster', look_c: 'Arbeitsplatz: dicht, geteilte Ansicht', look_d: 'Marke: blaue Leiste, Karten',
+      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', fresh: 'Neue Anfrage', history: 'Verlauf', examples: 'Beispiele für Anfragen',
+      sub: 'Beschreibe dein Anliegen in eigenen Worten. Ich prüfe, ob es dazu schon ein Ticket oder eine Seite gibt, und zeige dir den nächsten sinnvollen Schritt.',
+      ctx_title: 'Kontext und Ergebnisse', tab_sources: 'Quellen ({n})', tab_draft: 'Entwurf', back: 'Zurück zu den Quellen', n_sources: ['1 Quelle zeigen', '{n} Quellen zeigen'], ctx_wait: 'Die Quellen erscheinen hier, sobald die Antwort da ist.',
+      help_title: 'So hilft dir {app}', help1: 'Vorhandenes finden', help1_text: 'Erkennt, ob es dein Thema in Jira oder Confluence schon gibt.', help2: 'Ähnliches erklären', help2_text: 'Zeigt die ähnlichsten Tickets und Seiten mit den passenden Textstellen.', help3: 'Nächsten Schritt vorschlagen', help3_text: 'Ordnet einen Wunsch dem passenden Stream zu und schreibt den Ticket-Text vor.',
       history_empty: 'Deine Anfragen erscheinen hier. Sie bleiben in diesem Browser.', lang: 'Sprache', theme_dark: 'Dunkle Ansicht einschalten', theme_light: 'Helle Ansicht einschalten',
       side_close: 'Seitenleiste einklappen', side_open: 'Seitenleiste ausklappen',
       morning: 'Guten Morgen', day: 'Guten Tag', evening: 'Guten Abend', hero: 'Was möchtest du prüfen?',
@@ -48,7 +51,10 @@
       failed: 'Das hat nicht geklappt', retry: 'Erneut versuchen', loading: 'Wird geladen'
     },
     en: {
-      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', fresh: 'New request', history: 'History', look: 'Variant', look_a: 'Studio: floating surfaces', look_b: 'Focus: one calm surface, details as a window', look_c: 'Workspace: dense, split view', look_d: 'Brand: blue sidebar, cards',
+      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', fresh: 'New request', history: 'History', examples: 'Example requests',
+      sub: 'Describe your request in your own words. I check whether a ticket or page already covers it and show you the next sensible step.',
+      ctx_title: 'Context and results', tab_sources: 'Sources ({n})', tab_draft: 'Draft', back: 'Back to sources', n_sources: ['Show 1 source', 'Show {n} sources'], ctx_wait: 'Sources appear here as soon as the answer is ready.',
+      help_title: 'How {app} helps', help1: 'Find what exists', help1_text: 'Detects whether your topic already exists in Jira or Confluence.', help2: 'Explain similar entries', help2_text: 'Shows the most similar tickets and pages with the matching passages.', help3: 'Suggest the next step', help3_text: 'Assigns a request to the matching stream and drafts the ticket text.',
       history_empty: 'Your requests appear here. They stay in this browser.', lang: 'Language', theme_dark: 'Switch to dark view', theme_light: 'Switch to light view',
       side_close: 'Collapse sidebar', side_open: 'Expand sidebar',
       morning: 'Good morning', day: 'Good afternoon', evening: 'Good evening', hero: 'What would you like to check?',
@@ -100,7 +106,7 @@
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ohne Speicher */ } }
   };
   var S = { path: '/abgleich', ctx: null, lang: store.get('lang', 'de') === 'en' ? 'en' : 'de', side: store.get('side', 'open') === 'closed' ? 'closed' : 'open',
-    busy: false, fatal: '', seq: 0, turns: [], insp: null, data: { ctx: null, busy: false, error: '' },
+    busy: false, fatal: '', seq: 0, turns: [], insp: null, focus: 0, wide: false, data: { ctx: null, busy: false, error: '' },
     form: { text: '', modus: 'pruefen', country: '', quellen: ['jira', 'confluence'] } };
   var SHOWN = 4;
 
@@ -127,6 +133,15 @@
   function raf(fn) { if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn); else fn(); }
   function msg(e) { return e && e.message ? e.message : String(e); }
   function turnById(id) { return S.turns.filter(function (x) { return x.id === +id; })[0] || null; }
+  /** Breites Fenster: rechts steht dauerhaft die Quellenansicht. Schmal: Quellen in der Antwort, Details als Fenster darüber. */
+  function wide() { return !!(window.matchMedia && window.matchMedia('(min-width: 1181px)').matches); }
+  function focusTurn() { return (S.insp && turnById(S.insp.turn)) || (S.focus && turnById(S.focus)) || S.turns[S.turns.length - 1] || null; }
+  function initials() {
+    var n = S.ctx && S.ctx.me && S.ctx.me.name ? String(S.ctx.me.name).trim() : '';
+    if (!n) return '';
+    var p = n.split(/\s+/);
+    return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase();
+  }
   function srcName(s) { return s === 'confluence' ? t('confluence') : t('jira'); }
 
   function api(method, path, params) {
@@ -167,22 +182,24 @@
     }).join('') + '</ul>';
   }
 
-  function sideHtml() {
-    var dark = document.documentElement.dataset.theme === 'dark', open = S.side === 'open';
-    var nav = [['/abgleich', 'chat', t('match')], ['/daten', 'data', t('data')]].map(function (n) {
-      return '<a href="#' + n[0] + '" aria-label="' + n[2] + '" title="' + n[2] + '"' + (S.path === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[1]) + '<span>' + n[2] + '</span></a>';
-    }).join('');
-    return '<div class="side-head"><div class="brand"><img src="' + MARK_SRC + '" alt="" width="28" height="28"><span>' + esc(window.APP_NAME || '') + '</span></div>' +
-      '<button type="button" class="icon-btn" data-side-toggle aria-expanded="' + open + '" aria-label="' + t(open ? 'side_close' : 'side_open') + '">' + icon('panel') + '</button></div>' +
-      '<button type="button" class="new-btn" data-new aria-label="' + t('fresh') + '" title="' + t('fresh') + '">' + icon('plus') + '<span>' + t('fresh') + '</span></button>' +
-      '<nav class="nav" id="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
-      '<section class="hist" aria-labelledby="h-hist"><h2 id="h-hist">' + t('history') + '</h2><div id="hist">' + histHtml() + '</div></section>' +
-      '<div class="side-looks"><span id="h-look">' + t('look') + '</span><div class="seg" id="look" role="group" aria-labelledby="h-look">' + ['a', 'b', 'c', 'd'].map(function (k) {
-        return '<button type="button" class="seg-btn" data-look="' + k + '" aria-pressed="' + ((document.documentElement.dataset.look || 'a') === k) + '" title="' + t('look_' + k) + '">' + k.toUpperCase() + '</button>';
-      }).join('') + '</div></div>' +
-      '<div class="side-foot"><div class="seg" id="lang" role="group" aria-label="' + t('lang') + '">' +
+  function topHtml() {
+    var dark = document.documentElement.dataset.theme === 'dark', open = S.side === 'open', me = initials();
+    return '<button type="button" class="icon-btn" data-side-toggle aria-controls="side" aria-expanded="' + open + '" aria-label="' + t(open ? 'side_close' : 'side_open') + '">' + icon('panel') + '</button>' +
+      '<div class="brand"><img src="' + esc(MARK_SRC) + '" alt="" width="36" height="36"><span>' + esc(window.APP_NAME || '') + '</span></div>' +
+      '<span class="crumb">' + t(S.path === '/daten' ? 'data' : 'match') + '</span><span class="grow"></span>' +
+      '<div class="seg" id="lang" role="group" aria-label="' + t('lang') + '">' +
       '<button type="button" class="seg-btn" data-lang="de" aria-pressed="' + (S.lang === 'de') + '">DE</button><button type="button" class="seg-btn" data-lang="en" aria-pressed="' + (S.lang === 'en') + '">EN</button></div>' +
-      '<button type="button" class="icon-btn" data-theme-toggle id="theme" aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button></div>';
+      '<button type="button" class="icon-btn" data-theme-toggle id="theme" aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button>' +
+      (me ? '<span class="ava" aria-hidden="true">' + esc(me) + '</span>' : '');
+  }
+
+  function sideHtml() {
+    var nav = [['/abgleich', 'chat', t('match')], ['/daten', 'data', t('data')]].map(function (n) {
+      return '<a href="#' + n[0] + '" aria-label="' + n[2] + '" title="' + n[2] + '"' + (S.path === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[1]) + '<span class="lbl">' + n[2] + '</span></a>';
+    }).join('');
+    return '<button type="button" class="new-btn" data-new aria-label="' + t('fresh') + '" title="' + t('fresh') + '">' + icon('plus') + '<span class="lbl">' + t('fresh') + '</span></button>' +
+      '<nav class="nav" id="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
+      '<section class="hist" aria-labelledby="h-hist"><h2 id="h-hist">' + t('history') + '</h2><div id="hist">' + histHtml() + '</div></section>';
   }
 
   // ---------- Eingabe ----------
@@ -301,14 +318,20 @@
       return '<div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(turn.error || '') + '</p></div></div>' +
         '<div><button type="button" class="btn" data-again="' + turn.id + '">' + icon('refresh') + '<span>' + t('retry') + '</span></button></div>';
     }
-    var r = turn.result, s = r.search || {};
+    var r = turn.result, n = (r.hits || []).length;
+    var notes = [turn.error, (r.search || {}).note].filter(Boolean).map(function (x) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(x) + '</p></div>'; }).join('');
+    var sources = wide() ? (n ? '<div class="src-btn"><button type="button" class="btn" data-focus="' + turn.id + '">' + icon('layers') + '<span>' + plural('n_sources', n) + '</span></button></div>' : '') : hitsSec(turn);
+    return proseHtml(turn) + notes + sources + (r.modus === 'wunsch' ? wishHtml(turn) : '');
+  }
+
+  /** Quellenliste mit dem Hinweis, wie gesucht wurde. Steht schmal in der Antwort, breit in der rechten Hälfte. */
+  function hitsSec(turn) {
+    var s = turn.result.search || {};
     var how = s.lexical && s.vector ? 'how_both' : s.vector ? 'how_vec' : 'how_lex';
     var meta = '<div class="meta-line"><span class="tag">' + t(how) + '</span><span class="tag">' + t(s.reranker === 'ranking' ? 'rr_ranking' : s.reranker === 'gemini' ? 'rr_gemini' : 'rr_none') + '</span>' +
       '<span class="tag num">' + t('spots', { n: num(s.passages), s: took(s.ms) }) + '</span></div>';
-    var notes = [turn.error, s.note].filter(Boolean).map(function (n) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(n) + '</p></div>'; }).join('');
-    return proseHtml(turn) + notes + '<section class="sec"><div class="sec-head"><h3>' + t('hits') + '</h3></div><div id="hits-' + turn.id + '">' + hitsHtml(turn) + '</div>' +
-      '<details class="how"><summary>' + icon('chevron') + t('how') + '</summary>' + meta + '</details></section>' +
-      (r.modus === 'wunsch' ? wishHtml(turn) : '');
+    return '<section class="sec"><div class="sec-head"><h3>' + t('hits') + '</h3></div><div id="hits-' + turn.id + '">' + hitsHtml(turn) + '</div>' +
+      '<details class="how"><summary>' + icon('chevron') + t('how') + '</summary>' + meta + '</details></section>';
   }
 
   function turnHtml(turn) {
@@ -331,11 +354,10 @@
       return '<button type="button" data-example="' + i + '"><b>' + esc(e.label) + '</b><span>' + esc(e.text) + '</span></button>';
     }).join('') + '</div>' : '';
     var notices = S.ctx ? (S.ctx.notices || []).filter(String).map(function (n) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(n) + '</p></div>'; }).join('') : '';
-    return '<header class="topbar">' + (empty ? '<span class="crumb bar-only">' + t('match') + '</span>' : '<h1>' + t('match') + '</h1>') + '<span class="grow"></span></header>' +
-      '<div class="stage' + (empty ? ' is-empty' : '') + '" id="stage"><div class="scroll" id="scroll"><div class="col">' +
-      (empty ? '<div class="hero"><p class="hello">' + greeting() + '</p><h1>' + t('hero') + '</h1></div>' + notices
-        : '<div class="thread" id="thread">' + notices + S.turns.map(turnHtml).join('') + '</div>') +
-      '</div></div><div class="dock"><div class="col">' + composerHtml(empty) + ex + '</div></div></div>';
+    return '<div class="stage' + (empty ? ' is-empty' : '') + '" id="stage"><div class="scroll" id="scroll"><div class="col">' +
+      (empty ? '<div class="hero"><p class="hello">' + greeting() + '</p><h1>' + t('hero') + '</h1><p class="lead">' + t('sub') + '</p></div>' + notices
+        : '<div class="phead"><div><h1>' + t('hero') + '</h1><p>' + t('sub') + '</p></div></div><div class="thread" id="thread">' + notices + S.turns.map(turnHtml).join('') + '</div>') +
+      '</div></div><div class="dock glass" id="dock"><div class="col">' + composerHtml(empty) + (ex ? '<h2 class="cap">' + t('examples') + '</h2>' + ex : '') + '</div></div></div>';
   }
 
   // ---------- Seite Daten ----------
@@ -375,7 +397,7 @@
 
   function dataHtml() {
     var d = S.data, ctx = d.ctx, rep = ctx && ctx.report;
-    var top = '<header class="topbar"><h1>' + t('data') + '</h1><span class="grow"></span>' + (rep ? '<span class="tag">' + t('store_' + (rep.mode === 'bigquery' ? 'bigquery' : 'memory')) + '</span>' : '') + '</header>';
+    var top = '<div class="phead"><h1>' + t('data') + '</h1><span class="grow"></span>' + (rep ? '<span class="tag">' + t('store_' + (rep.mode === 'bigquery' ? 'bigquery' : 'memory')) + '</span>' : '') + '</div>';
     var head = '<div class="data-head"><div><h2>' + t('h_data') + '</h2><p>' + t('data_lede') + '</p></div>' +
       '<button type="button" class="btn" data-recalc' + (d.busy ? ' disabled' : '') + '>' + (d.busy ? '<span class="spinner" aria-hidden="true"></span>' : icon('refresh')) + '<span>' + t('recalc') + '</span></button></div>';
     var err = d.error || (ctx && ctx.error);
@@ -396,7 +418,7 @@
           return '<li><span class="dot ' + (x.ok ? 'ok' : 'bad') + '" aria-hidden="true"></span><div><span class="sr-only">' + t(x.ok ? 'sync_ok' : 'sync_bad') + ': </span><b>' + srcName(x.source) + '</b> <span class="fine">' + esc(x.at) + '</span><p class="fine">' + esc(x.note) + '</p></div></li>';
         }).join('') + '</ul>' : '<p class="fine">' + t('sync_none') + '</p>') + '</section>' : '') + '</div>';
     }
-    return top + '<div class="stage"><div class="scroll" id="scroll"><div class="col"><div class="data" id="data">' + head + body + '</div></div></div></div>';
+    return '<div class="stage"><div class="scroll" id="scroll"><div class="col">' + top + '<div class="data" id="data">' + head + body + '</div></div></div></div>';
   }
 
   /** Jira-Schreibweise lesbar zeigen (Überschriften, fett, Listen). Kopiert wird weiterhin der Jira-Text. */
@@ -416,15 +438,36 @@
 
   // ---------- Detailbereich ----------
 
+  function tabsHtml(turn, draftOn) {
+    var r = turn.result, n = r ? (r.hits || []).length : 0;
+    return '<div class="seg" id="tabs" role="group" aria-label="' + t('ctx_title') + '">' +
+      '<button type="button" class="seg-btn" ' + (draftOn ? 'data-insp-close' : 'data-focus="' + turn.id + '"') + ' aria-pressed="' + !draftOn + '">' + t('tab_sources', { n: num(n) }) + '</button>' +
+      (r && r.draft ? '<button type="button" class="seg-btn" data-turn="' + turn.id + '" data-draft aria-pressed="' + !!draftOn + '">' + t('tab_draft') + '</button>' : '') + '</div>';
+  }
+
+  /** Rechte Hälfte im breiten Fenster, solange kein Treffer und kein Entwurf geöffnet ist. */
+  function panelHtml() {
+    var turn = focusTurn();
+    if (!turn) {
+      var card = function (ic, k) { return '<li class="help-card"><span class="tile">' + icon(ic) + '</span><h3>' + t(k) + '</h3><p>' + t(k + '_text') + '</p></li>'; };
+      return '<div class="insp-body"><div class="insp-head glass"><h2 id="ctx-title">' + t('help_title', { app: esc(window.APP_NAME || '') }) + '</h2></div>' +
+        '<ul class="help">' + card('check', 'help1') + card('layers', 'help2') + card('arrow', 'help3') + '</ul></div>';
+    }
+    var body = turn.state === 'run' ? '<div class="think" role="status"><span class="orb" aria-hidden="true"></span><span>' + t('running') + '</span></div><div class="skel" aria-hidden="true"><i></i><i></i><i></i></div>'
+      : turn.result ? hitsSec(turn) : '<p class="fine">' + t('ctx_wait') + '</p>';
+    return '<div class="insp-body in"><div class="insp-head glass"><h2 id="ctx-title">' + t('ctx_title') + '</h2>' + tabsHtml(turn, false) + '</div>' + body + '</div>';
+  }
+
   function inspHtml() {
     var turn = S.insp && turnById(S.insp.turn);
     if (!turn || !turn.result) return '';
+    var w = wide();
     var close = '<button type="button" class="icon-btn" data-insp-close aria-label="' + t('close') + '">' + icon('x') + '</button>';
     if (S.insp.kind === 'draft') {
       var d = turn.result.draft;
-      return '<div class="insp-head">' + icon('draft') + '<span class="fine">' + t('draft') + '</span><span class="grow"></span>' + close + '</div>' +
-        '<div class="insp-body"><h2 id="insp-title" tabindex="-1">' + esc(d.title) + '</h2>' +
-        '<div class="meta-line"><span class="tag">' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + '</span>' + (d.country ? '<span class="tag">' + esc(d.country) + '</span>' : '') + '</div>' +
+      return '<div class="insp-body in"><div class="insp-head glass">' + (w ? '<h2 id="ctx-title">' + t('ctx_title') + '</h2>' + tabsHtml(turn, true) : icon('draft') + '<span class="fine">' + t('draft') + '</span><span class="grow"></span>' + close) + '</div>' +
+        '<div class="detail"><h2 id="insp-title" tabindex="-1">' + esc(d.title) + '</h2>' +
+        '<div class="meta-line"><span class="tag">' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + '</span>' + (d.country ? '<span class="tag">' + esc(d.country) + '</span>' : '') + '</div></div>' +
         '<div class="rich">' + jiraHtml(d.markup) + '</div></div>' +
         '<div class="insp-foot"><button type="button" class="btn btn-primary" data-copy="' + turn.id + '">' + icon('copy') + '<span>' + t('copy') + '</span></button></div>';
     }
@@ -433,16 +476,19 @@
     var url = safeUrl(h.url), names = (S.ctx && S.ctx.stream_names) || {};
     var kv = function (k, v) { return v ? '<dt>' + k + '</dt><dd>' + v + '</dd>' : ''; };
     var lvl = h.level === 'duplicate' || h.level === 'similar' || h.level === 'related' ? h.level : 'new';
-    return '<div class="insp-head">' + icon(h.source === 'confluence' ? 'confluence' : 'jira') + '<span class="mono">' + esc(h.id) + '</span>' + lvlChip(h.level) + '<span class="grow"></span>' + close + '</div>' +
-      '<div class="insp-body in"><h2 id="insp-title" tabindex="-1">' + esc(h.title) + '</h2>' +
+    return '<div class="insp-body in"><div class="insp-head glass is-row">' + (w ? '<button type="button" class="btn" data-insp-close><svg class="ic flip" aria-hidden="true" focusable="false"><use href="#i-arrow"/></svg><span>' + t('back') + '</span></button><span class="grow"></span>' : '') +
+      icon(h.source === 'confluence' ? 'confluence' : 'jira') + '<span class="mono">' + esc(h.id) + '</span>' + lvlChip(h.level) + (w ? '' : '<span class="grow"></span>' + close) + '</div>' +
+      '<div class="detail"><h2 id="insp-title" tabindex="-1">' + esc(h.title) + '</h2>' +
       '<div class="meter lvl-' + lvl + '" style="background:none"><b class="num">' + num(h.score) + ' %</b><div class="bar"><span style="--v:' + Math.max(0, Math.min(100, +h.score || 0)) + '"></span></div></div>' +
       '<dl class="kvs">' + kv(t('status'), esc(calm(h.status))) + kv('Stream', esc(names[h.stream] || h.stream)) + kv(t('epic'), h.epic ? '<span class="mono">' + esc(h.epic) + '</span>' : '') +
       kv(t('space'), esc(h.space)) + kv(t('updated'), h.updated ? esc(new Date(h.updated).toLocaleDateString(S.lang === 'en' ? 'en-GB' : 'de-DE')) : '') +
-      kv(t('found_by'), [h.by_keyword ? t('by_keyword') : '', h.by_meaning ? t('by_meaning') : ''].filter(Boolean).join(' + ')) + '</dl>' +
+      kv(t('found_by'), [h.by_keyword ? t('by_keyword') : '', h.by_meaning ? t('by_meaning') : ''].filter(Boolean).join(' + ')) + '</dl></div>' +
       '<div><h3>' + t('passages') + '</h3>' + (h.passages || []).map(function (p) { return '<p class="passage">' + (p.heading ? '<b>' + esc(p.heading) + '</b>' : '') + esc(p.text) + '</p>'; }).join('') +
       (h.n_passages > (h.passages || []).length ? '<p class="fine" style="margin-top:8px">' + t('more_spots', { n: h.n_passages - h.passages.length }) + '</p>' : '') + '</div></div>' +
       (url ? '<div class="insp-foot"><a class="btn btn-primary" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + icon('out') + '<span>' + t('open_in', { s: srcName(h.source) }) + '</span></a></div>' : '');
   }
+  /** Inhalt der rechten Seite: geöffneter Treffer oder Entwurf, sonst im breiten Fenster die Quellenansicht. */
+  function rightHtml() { return inspHtml() || (wide() && S.path === '/abgleich' && !S.fatal ? panelHtml() : ''); }
 
   // ---------- Zeichnen ----------
 
@@ -450,8 +496,8 @@
 
   function mainHtml() {
     if (S.fatal) {
-      return '<header class="topbar"><h1>' + esc(window.APP_NAME || '') + '</h1></header><div class="stage"><div class="col"><div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(S.fatal) + '</p></div></div>' +
-        '<p style="margin-top:14px"><button type="button" class="btn" data-reload>' + icon('refresh') + '<span>' + t('retry') + '</span></button></p></div></div>';
+      return '<div class="stage"><div class="scroll"><div class="col"><div class="phead"><h1>' + esc(window.APP_NAME || '') + '</h1></div><div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(S.fatal) + '</p></div></div>' +
+        '<p style="margin-top:14px"><button type="button" class="btn" data-reload>' + icon('refresh') + '<span>' + t('retry') + '</span></button></p></div></div></div>';
     }
     return S.path === '/daten' ? dataHtml() : matchHtml();
   }
@@ -460,7 +506,7 @@
     var o = instant ? { instant: true } : undefined;
     if ($('nav')) M.pill($('nav'), o);
     if ($('lang')) M.pill($('lang'), o);
-    if ($('look')) M.pill($('look'), o);
+    if ($('tabs')) M.pill($('tabs'), o);
     if ($('mode')) M.pill($('mode'), instant ? { instant: true, active: 'label:has(input:checked)' } : { active: 'label:has(input:checked)' });
   }
 
@@ -470,39 +516,45 @@
     var d = $('data');
     if (d) raf(function () { d.classList.add('in'); });
     pills(true);
+    dockFit();
   }
+  /** Die Eingabe schwebt über dem Gespräch; der Verlauf bekommt unten so viel Platz, wie sie hoch ist. */
+  function dockFit() { var d = $('dock'), st = $('stage'); if (d && st && st.style && d.offsetHeight) st.style.setProperty('--dock-h', d.offsetHeight + 'px'); }
 
   function drawAll() {
-    var insp = inspHtml();
+    S.wide = wide();
+    var insp = rightHtml();
     app.innerHTML = '<a class="skip" href="#main">' + t('skip') + '</a><div class="app" id="shell" data-side="' + S.side + '" data-insp="' + (insp ? 1 : 0) + '">' +
+      '<header class="top glass" id="top">' + topHtml() + '</header>' +
       '<aside class="side" id="side">' + sideHtml() + '</aside><main class="main" id="main" tabindex="-1">' + mainHtml() + '</main>' +
-      '<button type="button" class="scrim" data-insp-close tabindex="-1" aria-label="' + t('close') + '"></button><aside class="insp" id="insp" aria-labelledby="insp-title"' + (insp ? '' : ' hidden') + '>' + insp + '</aside></div><div class="live" id="live" role="status" aria-live="polite"></div><div class="sr-only" id="say" role="status" aria-live="polite"></div>';
+      '<button type="button" class="scrim" data-insp-close tabindex="-1" aria-label="' + t('close') + '"></button><aside class="insp" id="insp" aria-label="' + t('ctx_title') + '" data-view="' + (S.insp ? 'detail' : 'list') + '"' + (insp ? '' : ' hidden') + '>' + insp + '</aside></div><div class="live" id="live" role="status" aria-live="polite"></div><div class="sr-only" id="say" role="status" aria-live="polite"></div>';
     afterMain();
   }
 
   function drawMain() { var m = $('main'); if (!m) { drawAll(); return; } m.innerHTML = mainHtml(); afterMain(); }
-  function drawSide() { var s = $('side'); if (s) { s.innerHTML = sideHtml(); pills(true); } }
+  function drawSide() { var s = $('side'), tp = $('top'); if (tp) tp.innerHTML = topHtml(); if (s) { s.innerHTML = sideHtml(); pills(true); } }
   function drawHist() { var h = $('hist'); if (h) h.innerHTML = histHtml(); }
   function drawInsp() {
-    var p = $('insp'), sh = $('shell'), html = inspHtml();
+    var p = $('insp'), sh = $('shell'), html = rightHtml();
     if (!p || !sh) return;
-    p.innerHTML = html; p.hidden = !html; sh.dataset.insp = html ? '1' : '0';
+    p.innerHTML = html; p.hidden = !html; sh.dataset.insp = html ? '1' : '0'; p.setAttribute('data-view', S.insp ? 'detail' : 'list');
     modal();
+    if ($('tabs')) M.pill($('tabs'), { instant: true });
     Array.prototype.forEach.call(document.querySelectorAll('.hit.is-open, .artifact.is-open'), function (el) {
       el.classList.remove('is-open'); var b = el.querySelector('[aria-expanded]'); if (b) b.setAttribute('aria-expanded', 'false');
     });
     var row = S.insp ? document.querySelector(S.insp.kind === 'draft' ? '[data-draft-row="' + S.insp.turn + '"]' : '[data-hit-row="' + S.insp.turn + '-' + S.insp.i + '"]') : null;
     if (row) { row.classList.add('is-open'); var b = row.querySelector('[aria-expanded]'); if (b) b.setAttribute('aria-expanded', 'true'); }
   }
-  /** Unter 1180 px liegt der Detailbereich über der Seite: dann ist er ein Dialog und der Rest nicht bedienbar. */
+  /** Bis 1180 px liegt der Detailbereich über der Seite: dann ist er ein Dialog und der Rest nicht bedienbar. */
   function modal() {
-    var p = $('insp'), on = !!(p && !p.hidden && window.matchMedia && (document.documentElement.dataset.look === 'b' || window.matchMedia('(max-width: 1180px)').matches));
+    var p = $('insp'), on = !!(p && !p.hidden && !wide());
     ['side', 'main'].forEach(function (id) { var el = $(id); if (el) el.inert = on; });
     if (!p) return;
     if (on) { p.setAttribute('role', 'dialog'); p.setAttribute('aria-modal', 'true'); } else { p.removeAttribute('role'); p.removeAttribute('aria-modal'); }
   }
   function scrollEnd() { var s = $('scroll'); if (s) s.scrollTop = s.scrollHeight; }
-  function scrollToTurn(turn) { var el = $('turn-' + turn.id), s = $('scroll'); if (el && s) s.scrollTop = Math.max(0, el.offsetTop - 12); }
+  function scrollToTurn(turn) { var el = $('turn-' + turn.id), s = $('scroll'); if (el && s) s.scrollTop = Math.max(0, el.offsetTop - 76); }
 
   function readForm() {
     var f = $('composer');
@@ -551,6 +603,13 @@
       Array.prototype.forEach.call(a.querySelectorAll('.prose'), function (p, i) { setTimeout(function () { M.words(p); }, i * 320); });
       Array.prototype.forEach.call(a.querySelectorAll('[data-count]'), function (el) { M.count(el, +el.getAttribute('data-count'), { format: function (n) { return num(Math.round(n)) + ' %'; } }); });
       raf(function () { a.classList.add('in'); });
+      if (wide()) {
+        S.focus = turn.id;
+        if (S.insp && S.insp.turn !== turn.id) S.insp = null;
+        drawInsp();
+        var list = document.querySelectorAll('#insp .hit');
+        if (list.length) M.enter(list, { stagger: 60 });
+      }
       scrollToTurn(turn);
       var h = $('h-verdict-' + turn.id) || a.querySelector('[role=alert]');
       if (h && h.focus && document.activeElement && document.activeElement.id !== 'text') h.focus({ preventScroll: true });
@@ -592,6 +651,7 @@
     var first = !S.turns.length || !$('thread');
     S.form.text = '';
     S.busy = true;
+    S.focus = turn.id; S.insp = null;
     if (first) {
       M.morph(function () { S.turns.push(turn); drawMain(); }, { type: 'dock' }).then(function () { var ta = $('text'); if (ta) ta.focus(); });
     } else {
@@ -603,12 +663,13 @@
       M.enter(el.children, { stagger: 80 });
       scrollEnd();
     }
+    drawInsp();
     runTurn(turn);
   }
 
   function fresh() {
     if (S.busy) return;
-    var go = function () { S.turns = []; S.insp = null; S.form.text = ''; S.path = '/abgleich'; drawAll(); };
+    var go = function () { S.turns = []; S.insp = null; S.focus = 0; S.form.text = ''; S.path = '/abgleich'; drawAll(); };
     if (location.hash.replace(/^#/, '') === '/daten') { S.turns = []; S.insp = null; location.hash = '#/abgleich'; return; }
     M.morph(go, { type: 'dock' }).then(function () { var ta = $('text'); if (ta) ta.focus(); });
   }
@@ -616,15 +677,17 @@
   function openInsp(turnId, kind, i, origin) {
     var same = S.insp && S.insp.turn === turnId && S.insp.kind === kind && S.insp.i === i;
     if (same) { closeInsp(); return; }
+    // Morph: die angeklickte Karte wächst zur Detailansicht. Breit liegt das Ziel in der rechten Hälfte, schmal ist es das ganze Fenster.
     var row = !S.insp && origin && origin.closest('.hit, .artifact');
+    var target = function () { var p = $('insp'); return p && wide() && kind === 'hit' ? p.querySelector('.detail') : p; };
     if (row) row.style.viewTransitionName = 'inspect';
     M.morph(function () {
       if (row) row.style.viewTransitionName = '';
       S.insp = { turn: turnId, kind: kind, i: i };
       drawInsp();
-      var p = $('insp'); if (p && row) p.style.viewTransitionName = 'inspect';
+      var p = target(); if (p && row) p.style.viewTransitionName = 'inspect';
     }, { type: 'inspect' }).then(function () {
-      var p = $('insp'); if (p) p.style.viewTransitionName = '';
+      var p = target(); if (p) p.style.viewTransitionName = '';
       var h = $('insp-title'); if (h) h.focus({ preventScroll: true });
       raf(function () { var b = document.querySelector('#insp .insp-body'); if (b) b.classList.add('in'); });
     });
@@ -709,7 +772,7 @@
     if (e.target.id === 'text' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); return; }
   });
   if (document.addEventListener) document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && S.insp) { e.preventDefault(); closeInsp(true); } });
-  app.addEventListener('input', function (e) { if (e.target.id === 'text') { var h = $('hint'); if (h && h.className === 'err') hint(t(S.form.modus === 'wunsch' ? 'hint_wish' : 'hint_check')); } });
+  app.addEventListener('input', function (e) { if (e.target.id === 'text') { dockFit(); var h = $('hint'); if (h && h.className === 'err') hint(t(S.form.modus === 'wunsch' ? 'hint_wish' : 'hint_check')); } });
   app.addEventListener('change', function (e) {
     if (e.target.name !== 'modus' && e.target.name !== 'quelle' && e.target.name !== 'country') return;
     readForm();
@@ -718,6 +781,7 @@
     hint(t(wish ? 'hint_wish' : 'hint_check'));
     if (box && S.ctx && (S.ctx.countries || []).length) { var was = box.hidden; box.hidden = !wish; if (was && wish) M.enter(box, { y: 0 }); }
     pills();
+    dockFit();
   });
   app.addEventListener('mouseover', function (e) { light(e, true); });
   app.addEventListener('mouseout', function (e) { light(e, false); });
@@ -733,10 +797,10 @@
     if (!el) return;
     if (el.classList.contains('skip')) { e.preventDefault(); var mm = $('main'); if (mm) mm.focus(); return; }
     if (el.hasAttribute('data-lang')) { readForm(); S.lang = el.getAttribute('data-lang') === 'en' ? 'en' : 'de'; store.set('lang', S.lang); drawAll(); var l = document.querySelector('[data-lang="' + S.lang + '"]'); if (l) l.focus(); return; }
-    if (el.hasAttribute('data-look')) {
-      var lk = el.getAttribute('data-look');
-      store.set('look', lk);
-      M.morph(function () { document.documentElement.dataset.look = lk; drawSide(); modal(); }, { type: 'theme' }).then(function () { pills(true); var bl = document.querySelector('[data-look="' + lk + '"]'); if (bl) bl.focus(); });
+    if (el.hasAttribute('data-focus')) {
+      var fid = +el.getAttribute('data-focus');
+      if (S.focus === fid && !S.insp) return;
+      M.morph(function () { S.focus = fid; S.insp = null; drawInsp(); }, { type: 'close' }).then(function () { var fb = document.querySelector('#tabs [aria-pressed="true"]'); if (fb) fb.focus({ preventScroll: true }); });
       return;
     }
     if (el.hasAttribute('data-theme-toggle')) {
@@ -758,7 +822,7 @@
       var r = history()[+el.getAttribute('data-hist')];
       if (!r || S.busy) return;
       S.form = { text: r.text, modus: r.modus === 'wunsch' ? 'wunsch' : 'pruefen', country: r.country || S.form.country, quellen: Array.isArray(r.quellen) && r.quellen.length ? r.quellen : ['jira', 'confluence'] };
-      S.turns = []; S.insp = null; S.path = '/abgleich';
+      S.turns = []; S.insp = null; S.focus = 0; S.path = '/abgleich';
       if (r.result && r.result.verdict) {
         var f = S.form;
         S.turns = [{ id: ++S.seq, form: { text: f.text, modus: f.modus, country: f.country, quellen: f.quellen.slice() }, state: 'done', result: r.result, error: '', all: false }];
@@ -787,7 +851,7 @@
     if (el.hasAttribute('data-more')) {
       var turn = turnById(el.getAttribute('data-more')), box = turn && $('hits-' + turn.id);
       if (!box) return;
-      M.flip($('turn-' + turn.id), function () { turn.all = !turn.all; box.innerHTML = hitsHtml(turn); }).then(function () { var b = box.querySelector('.more-btn'); if (b) b.focus({ preventScroll: true }); });
+      M.flip(box.closest('.turn, .insp-body'), function () { turn.all = !turn.all; box.innerHTML = hitsHtml(turn); }).then(function () { var b = box.querySelector('.more-btn'); if (b) b.focus({ preventScroll: true }); });
       return;
     }
     if (el.hasAttribute('data-copy')) { var tc = turnById(el.getAttribute('data-copy')); if (tc && tc.result && tc.result.draft) copyText(tc.result.draft.markup || '', el); return; }
@@ -802,7 +866,10 @@
     go(p);
     if (S.pending) { S.pending = false; submit(); }
   });
-  window.addEventListener('resize', function () { pills(true); modal(); });
+  window.addEventListener('resize', function () {
+    if (wide() !== S.wide) { readForm(); drawAll(); return; }
+    pills(true); modal(); dockFit();
+  });
 
   M.init();
   S.path = window.BOOT ? window.BOOT.path : (location.hash.replace(/^#/, '') === '/daten' ? '/daten' : '/abgleich');

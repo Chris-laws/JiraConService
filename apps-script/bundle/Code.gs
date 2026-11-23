@@ -20,6 +20,7 @@ function doGet(e) {
   }
   var template = HtmlService.createTemplateFromFile('Index');
   template.appName = settings.appName;
+  template.appLogo = settings.appLogo;
   template.startPath = (e && e.parameter && e.parameter.seite) ? String(e.parameter.seite) : '';
   template.perf = !!(e && e.parameter && e.parameter.perf === '1');
   template.viewer = viewerKey_();
@@ -150,6 +151,7 @@ var STREAMS = [
  */
 var PROPERTY_DEFAULTS = {
   APP_NAME: 'ReqAlign',
+  APP_LOGO: '',                        // eigenes Logo oben links: data:image/png;base64,… (höchstens 9 KB) oder https-Adresse; leer = Standardzeichen
   DATA_SOURCE: 'live',                 // live = echte Daten aus Jira/Confluence/ServiceNow (nur lesend)
   VERTEX_PROJECT_ID: 'PLATZHALTER-gcp-projekt-id',
   VERTEX_LOCATION: 'global',
@@ -266,6 +268,7 @@ function loadSettings(props) {
 
   return {
     appName: prop_(props, 'APP_NAME') || 'ReqAlign',
+    appLogo: prop_(props, 'APP_LOGO') || PROPERTY_DEFAULTS.APP_LOGO || '',
     dataSource: dataSource,
     vertexProjectId: project,
     vertexLocation: prop_(props, 'VERTEX_LOCATION') || 'global',
