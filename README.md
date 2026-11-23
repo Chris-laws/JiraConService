@@ -9,6 +9,12 @@ Läuft als **Streamlit-App auf Databricks Apps**. Lokal und ohne Firmennetz funk
 - Design: [docs/superpowers/specs/2026-10-27-reqpilot-design.md](docs/superpowers/specs/2026-10-27-reqpilot-design.md)
 - Umsetzungsplan: [docs/superpowers/plans/2026-10-27-reqpilot-grundgeruest.md](docs/superpowers/plans/2026-10-27-reqpilot-grundgeruest.md)
 
+## Apps-Script-Fassung
+
+Die komplette Web-App gibt es auch als Google Apps Script Web-App (gleiche Seiten und Fachlogik, Gemini über
+Vertex AI mit Projekt-ID statt API-Key). Einrichtung zum Kopieren in drei Dateien:
+[apps-script/README.md](apps-script/README.md).
+
 ## Funktionen
 
 | Seite | Was sie tut |

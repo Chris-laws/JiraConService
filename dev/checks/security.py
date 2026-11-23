@@ -12,7 +12,7 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|token|secret|password|pat)\s*[=:]\s*['\"][A-Za-z0-9_\-]{16,}['\"]"),
     re.compile(r"(?i)authorization:\s*bearer\s+[A-Za-z0-9._\-]{20,}"),
 ]
-TEXT_SUFFIXES = {".py", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".example", ".js", ".cfg"}
+TEXT_SUFFIXES = {".py", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".example", ".js", ".cfg", ".gs", ".html"}
 HTML_ALLOWED = {ROOT / "src" / "reqpilot" / "ui" / "theme.py"}
 
 
@@ -31,6 +31,8 @@ def secrets() -> Result:
         text = path.read_text(encoding="utf-8", errors="ignore")
         for rx in SECRET_PATTERNS:
             for m in rx.finditer(text):
+                if "PLATZHALTER" in m.group():  # Platzhalter aus setup(), kein Geheimnis
+                    continue
                 hits.append(f"{path.relative_to(ROOT)}: {m.group()[:12]}…")
     if (ROOT / ".env").exists() and ".env" not in (ROOT / ".gitignore").read_text():
         hits.append(".env ist nicht in .gitignore")
