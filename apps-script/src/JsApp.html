@@ -7,7 +7,7 @@
 
   var TEXT = {
     de: {
-      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', fresh: 'Neue Anfrage', history: 'Verlauf',
+      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', fresh: 'Neue Anfrage', history: 'Verlauf', look: 'Variante', look_a: 'Studio: schwebende Flächen', look_b: 'Fokus: eine ruhige Fläche, Details als Fenster', look_c: 'Arbeitsplatz: dicht, geteilte Ansicht', look_d: 'Marke: blaue Leiste, Karten',
       history_empty: 'Deine Anfragen erscheinen hier. Sie bleiben in diesem Browser.', lang: 'Sprache', theme_dark: 'Dunkle Ansicht einschalten', theme_light: 'Helle Ansicht einschalten',
       side_close: 'Seitenleiste einklappen', side_open: 'Seitenleiste ausklappen',
       morning: 'Guten Morgen', day: 'Guten Tag', evening: 'Guten Abend', hero: 'Was möchtest du prüfen?',
@@ -48,7 +48,7 @@
       failed: 'Das hat nicht geklappt', retry: 'Erneut versuchen', loading: 'Wird geladen'
     },
     en: {
-      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', fresh: 'New request', history: 'History',
+      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', fresh: 'New request', history: 'History', look: 'Variant', look_a: 'Studio: floating surfaces', look_b: 'Focus: one calm surface, details as a window', look_c: 'Workspace: dense, split view', look_d: 'Brand: blue sidebar, cards',
       history_empty: 'Your requests appear here. They stay in this browser.', lang: 'Language', theme_dark: 'Switch to dark view', theme_light: 'Switch to light view',
       side_close: 'Collapse sidebar', side_open: 'Expand sidebar',
       morning: 'Good morning', day: 'Good afternoon', evening: 'Good evening', hero: 'What would you like to check?',
@@ -177,6 +177,9 @@
       '<button type="button" class="new-btn" data-new aria-label="' + t('fresh') + '" title="' + t('fresh') + '">' + icon('plus') + '<span>' + t('fresh') + '</span></button>' +
       '<nav class="nav" id="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
       '<section class="hist" aria-labelledby="h-hist"><h2 id="h-hist">' + t('history') + '</h2><div id="hist">' + histHtml() + '</div></section>' +
+      '<div class="side-looks"><span id="h-look">' + t('look') + '</span><div class="seg" id="look" role="group" aria-labelledby="h-look">' + ['a', 'b', 'c', 'd'].map(function (k) {
+        return '<button type="button" class="seg-btn" data-look="' + k + '" aria-pressed="' + ((document.documentElement.dataset.look || 'a') === k) + '" title="' + t('look_' + k) + '">' + k.toUpperCase() + '</button>';
+      }).join('') + '</div></div>' +
       '<div class="side-foot"><div class="seg" id="lang" role="group" aria-label="' + t('lang') + '">' +
       '<button type="button" class="seg-btn" data-lang="de" aria-pressed="' + (S.lang === 'de') + '">DE</button><button type="button" class="seg-btn" data-lang="en" aria-pressed="' + (S.lang === 'en') + '">EN</button></div>' +
       '<button type="button" class="icon-btn" data-theme-toggle id="theme" aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button></div>';
@@ -328,7 +331,7 @@
       return '<button type="button" data-example="' + i + '"><b>' + esc(e.label) + '</b><span>' + esc(e.text) + '</span></button>';
     }).join('') + '</div>' : '';
     var notices = S.ctx ? (S.ctx.notices || []).filter(String).map(function (n) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(n) + '</p></div>'; }).join('') : '';
-    return '<header class="topbar">' + (empty ? '' : '<h1>' + t('match') + '</h1>') + '<span class="grow"></span></header>' +
+    return '<header class="topbar">' + (empty ? '<span class="crumb bar-only">' + t('match') + '</span>' : '<h1>' + t('match') + '</h1>') + '<span class="grow"></span></header>' +
       '<div class="stage' + (empty ? ' is-empty' : '') + '" id="stage"><div class="scroll" id="scroll"><div class="col">' +
       (empty ? '<div class="hero"><p class="hello">' + greeting() + '</p><h1>' + t('hero') + '</h1></div>' + notices
         : '<div class="thread" id="thread">' + notices + S.turns.map(turnHtml).join('') + '</div>') +
@@ -457,6 +460,7 @@
     var o = instant ? { instant: true } : undefined;
     if ($('nav')) M.pill($('nav'), o);
     if ($('lang')) M.pill($('lang'), o);
+    if ($('look')) M.pill($('look'), o);
     if ($('mode')) M.pill($('mode'), instant ? { instant: true, active: 'label:has(input:checked)' } : { active: 'label:has(input:checked)' });
   }
 
@@ -492,7 +496,7 @@
   }
   /** Unter 1180 px liegt der Detailbereich über der Seite: dann ist er ein Dialog und der Rest nicht bedienbar. */
   function modal() {
-    var p = $('insp'), on = !!(p && !p.hidden && window.matchMedia && window.matchMedia('(max-width: 1180px)').matches);
+    var p = $('insp'), on = !!(p && !p.hidden && window.matchMedia && (document.documentElement.dataset.look === 'b' || window.matchMedia('(max-width: 1180px)').matches));
     ['side', 'main'].forEach(function (id) { var el = $(id); if (el) el.inert = on; });
     if (!p) return;
     if (on) { p.setAttribute('role', 'dialog'); p.setAttribute('aria-modal', 'true'); } else { p.removeAttribute('role'); p.removeAttribute('aria-modal'); }
@@ -729,6 +733,12 @@
     if (!el) return;
     if (el.classList.contains('skip')) { e.preventDefault(); var mm = $('main'); if (mm) mm.focus(); return; }
     if (el.hasAttribute('data-lang')) { readForm(); S.lang = el.getAttribute('data-lang') === 'en' ? 'en' : 'de'; store.set('lang', S.lang); drawAll(); var l = document.querySelector('[data-lang="' + S.lang + '"]'); if (l) l.focus(); return; }
+    if (el.hasAttribute('data-look')) {
+      var lk = el.getAttribute('data-look');
+      store.set('look', lk);
+      M.morph(function () { document.documentElement.dataset.look = lk; drawSide(); modal(); }, { type: 'theme' }).then(function () { pills(true); var bl = document.querySelector('[data-look="' + lk + '"]'); if (bl) bl.focus(); });
+      return;
+    }
     if (el.hasAttribute('data-theme-toggle')) {
       var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
       M.morph(function () { document.documentElement.dataset.theme = next; }, { type: 'theme' });

@@ -147,7 +147,7 @@ function audit() {
   };
   for (const { theme, w, lang } of runs) {
     const ctx = await browser.newContext({ viewport: { width: w, height: 900 } });
-    await ctx.addInitScript(([t, l]) => { try { localStorage.setItem('theme', t); localStorage.setItem('lang', l); } catch (e) { /* egal */ } }, [theme, lang]);
+    await ctx.addInitScript(([t, l, k]) => { try { localStorage.setItem('theme', t); localStorage.setItem('lang', l); if (k) localStorage.setItem('look', k); } catch (e) { /* egal */ } }, [theme, lang, process.env.LOOK || '']);
     const page = await ctx.newPage();
     const tag = `${theme} ${w}${lang === 'en' ? ' en' : ''}`;
     page.on('pageerror', (e) => note('js', ['window'], tag, e.message));
@@ -197,7 +197,7 @@ function audit() {
       await page.goto(base, { waitUntil: 'networkidle' });
       await page.waitForSelector('#composer');
       const seen = new Set();
-      for (let i = 0; i < 16; i++) {
+      for (let i = 0; i < 22; i++) {
         await page.keyboard.press('Tab');
         seen.add(await page.evaluate(() => { const a = document.activeElement; const s = getComputedStyle(a); const lab = a.closest('label');
           const ring = s.outlineStyle !== 'none' || (lab && [...lab.querySelectorAll('span'), lab].some((x) => getComputedStyle(x).outlineStyle !== 'none'));
