@@ -21,10 +21,10 @@
       too_short: 'Bitte beschreibe das Anliegen in einem ganzen Satz.', no_source: 'Bitte mindestens eine Quelle wählen.',
       step1: 'Suche nach Stichwörtern und nach Bedeutung', step2: 'Die besten Stellen werden sortiert', step3: 'Die Antwort wird zusammengestellt',
       duplicate: 'Duplikat', similar: 'Sehr ähnlich', related: 'Verwandt', fresh_lvl: 'Neu',
-      pts_title: 'Was ist wirklich neu?', pts_ai: 'Zerlegt und geprüft von Gemini', pts_rule: 'Zerlegt nach Sätzen',
-      pt_exists: 'Gibt es schon', pt_partial: 'Teilweise da', pt_new: 'Neu', pt_in: 'in', pt_to_draft: 'kommt in den Entwurf', pt_nothing: 'nichts Passendes gefunden',
+      pts_title: 'Was ist wirklich neu?',
+      pt_exists: 'Gibt es schon', pt_partial: 'Teilweise da', pt_new: 'Neu', pt_in: 'in', pt_to_draft: 'kommt in den Entwurf', pt_proof: 'Beleg zeigen',
       v_mixed: ['{k} von {n} Punkten gibt es schon.', '{k} von {n} Punkten gibt es schon.'], v_all_known: 'Alle {n} Punkte gibt es schon.',
-      pts_bar: '{e} gibt es schon, {p} teilweise, {f} neu', pts_wish: 'Nur das Neue als Wunsch formulieren',
+      pts_wish: 'Nur das Neue als Wunsch formulieren',
       draft_scope: ['Enthält nur den neuen Punkt. {k} bestehende stehen unter „Abgrenzung“ mit Verweis.', 'Enthält nur die {n} neuen Punkte. {k} bestehende stehen unter „Abgrenzung“ mit Verweis.'],
       draft_all_known: 'Alle Punkte gibt es schon. Ergänze lieber das vorhandene Ticket, statt ein neues anzulegen.',
       v_duplicate: 'Das gibt es sehr wahrscheinlich schon.', v_similar: 'Ähnliches ist schon da.', v_new: 'Dazu gibt es noch nichts.',
@@ -71,10 +71,10 @@
       too_short: 'Please describe the request in a full sentence.', no_source: 'Please choose at least one source.',
       step1: 'Searching by keywords and by meaning', step2: 'Ordering the best passages', step3: 'Putting the answer together',
       duplicate: 'Duplicate', similar: 'Very similar', related: 'Related', fresh_lvl: 'New',
-      pts_title: 'What is really new?', pts_ai: 'Split and checked by Gemini', pts_rule: 'Split by sentence',
-      pt_exists: 'Exists', pt_partial: 'Partly there', pt_new: 'New', pt_in: 'in', pt_to_draft: 'goes into the draft', pt_nothing: 'nothing matching found',
+      pts_title: 'What is really new?',
+      pt_exists: 'Exists', pt_partial: 'Partly there', pt_new: 'New', pt_in: 'in', pt_to_draft: 'goes into the draft', pt_proof: 'Show evidence',
       v_mixed: ['{k} of {n} points already exists.', '{k} of {n} points already exist.'], v_all_known: 'All {n} points already exist.',
-      pts_bar: '{e} exist, {p} partly, {f} new', pts_wish: 'Turn only the new part into a request',
+      pts_wish: 'Turn only the new part into a request',
       draft_scope: ['Contains only the new point. {k} existing ones are listed under “Abgrenzung” with a link.', 'Contains only the {n} new points. {k} existing ones are listed under “Abgrenzung” with a link.'],
       draft_all_known: 'All points already exist. Better extend the existing ticket than create a new one.',
       v_duplicate: 'This very likely exists already.', v_similar: 'Something similar exists.', v_new: 'There is nothing on this yet.',
@@ -297,36 +297,32 @@
     }).join('');
   }
 
-  function pointHtml(turn, it, i) {
+  function pointHtml(turn, it) {
     var st = it.status === 'exists' || it.status === 'partial' ? it.status : 'new';
     var ic = st === 'exists' ? 'check' : st === 'partial' ? 'half' : 'plus';
     var ref = it.ref, meta = '<span class="pt-tag">' + t('pt_' + st) + '</span>';
     if (ref) {
-      var label = icon(ref.source === 'confluence' ? 'confluence' : 'jira') + '<span class="mono">' + esc(ref.id) + '</span>';
-      var url = safeUrl(ref.url);
+      var label = '<span class="mono">' + esc(ref.id) + '</span>';
+      var url = safeUrl(ref.url), tip = ' title="' + esc(ref.title) + '"';
       meta += '<span class="pt-in">' + t('pt_in') + '</span>' + (ref.hit >= 0
-        ? '<button type="button" class="pt-ref" data-turn="' + turn.id + '" data-hit="' + ref.hit + '" aria-label="' + esc(t('details', { id: ref.id })) + '">' + label + '</button>'
-        : url ? '<a class="pt-ref" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : '<span class="pt-ref">' + label + '</span>') +
-        '<span class="pt-title">' + esc(ref.title) + '</span>';
-    } else {
-      meta += '<span class="pt-in">' + t(turn.result.modus === 'wunsch' ? 'pt_to_draft' : 'pt_nothing') + '</span>';
+        ? '<button type="button" class="pt-ref" data-turn="' + turn.id + '" data-hit="' + ref.hit + '"' + tip + ' aria-label="' + esc(t('details', { id: ref.id })) + '">' + label + '</button>'
+        : url ? '<a class="pt-ref" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer"' + tip + '>' + label + '</a>' : '<span class="pt-ref"' + tip + '>' + label + '</span>');
+    } else if (turn.result.modus === 'wunsch') {
+      meta += '<span class="pt-in">' + t('pt_to_draft') + '</span>';
     }
+    // Der Beleg ist da, aber zugeklappt: die Liste bleibt ruhig, wer zweifelt, klappt auf.
+    var proof = ref && ref.quote ? '<details class="pt-proof"><summary>' + icon('chevron') + t('pt_proof') + '</summary><blockquote class="pt-quote">' + markQuote(ref.quote, it.text) + '</blockquote></details>' : '';
     return '<li class="pt is-' + st + '"><span class="pt-ic" aria-hidden="true">' + icon(ic) + '</span><div class="pt-main">' +
-      '<p class="pt-text">' + esc(it.text) + '</p><div class="pt-meta">' + meta + '</div>' +
-      (ref && ref.quote ? '<blockquote class="pt-quote">' + markQuote(ref.quote, it.text) + '</blockquote>' : '') + '</div></li>';
+      '<p class="pt-text">' + esc(it.text) + '</p><div class="pt-meta">' + meta + '</div>' + proof + '</div></li>';
   }
 
   function pointsHtml(turn) {
     var r = turn.result, pc = ptCounts(r);
     if (!pc) return '';
-    var items = r.points.items;
-    var bar = '<div class="pt-bar" role="img" aria-label="' + esc(t('pts_bar', { e: num(pc.exists), p: num(pc.partial), f: num(pc.fresh) })) + '">' +
-      items.map(function (it, i) { return '<i class="is-' + esc(it.status) + '" style="--d:' + Math.round(160 + 70 * Math.sqrt(i)) + 'ms"></i>'; }).join('') + '</div>';
     var wish = r.modus !== 'wunsch' && pc.fresh && pc.known
       ? '<div><button type="button" class="btn" data-as-wish="' + turn.id + '">' + icon('draft') + '<span>' + t('pts_wish') + '</span></button></div>' : '';
-    return '<section class="sec pts" aria-labelledby="pts-h-' + turn.id + '"><div class="sec-head"><h3 id="pts-h-' + turn.id + '">' + icon('split') + t('pts_title') + '</h3>' +
-      '<span class="fine">' + t(r.points.method === 'gemini' ? 'pts_ai' : 'pts_rule') + '</span></div>' + bar +
-      '<ol class="pts-list">' + items.map(function (it, i) { return pointHtml(turn, it, i); }).join('') + '</ol>' +
+    return '<section class="sec pts" aria-labelledby="pts-h-' + turn.id + '"><div class="sec-head"><h3 id="pts-h-' + turn.id + '">' + icon('split') + t('pts_title') + '</h3></div>' +
+      '<ol class="pts-list">' + r.points.items.map(function (it) { return pointHtml(turn, it); }).join('') + '</ol>' +
       (r.points.note ? '<p class="fine">' + esc(r.points.note) + '</p>' : '') + wish + '</section>';
   }
 

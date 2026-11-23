@@ -211,34 +211,30 @@ a { color: var(--accent-ink); text-underline-offset: 3px; }
 .sec h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--ink-2); }
 .sec h3 .ic { width: 16px; height: 16px; }
 .fine { font-size: 14px; color: var(--ink-3); }
-.pts { gap: 16px; }
-.pt-bar { display: flex; gap: 4px; height: 8px; }
-.pt-bar i { flex: 1; border-radius: 999px; background: var(--new); transform-origin: left center; animation: pt-grow 520ms var(--spring-smooth) both; animation-delay: var(--d, 0ms); }
-.pt-bar i.is-exists { background: var(--dup); }
-.pt-bar i.is-partial { background: var(--sim); }
-@keyframes pt-grow { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
-.pts-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.pt { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 12px 16px 12px 12px; border-radius: var(--r-l); background: var(--bg); }
-.pt.is-new { background: var(--new-soft); box-shadow: inset 0 0 0 1px rgba(11, 107, 67, .18); }
-.pt-ic { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: var(--dup-soft); color: var(--dup); }
-.pt-ic .ic { width: 16px; height: 16px; }
-.pt.is-partial .pt-ic { background: var(--sim-soft); color: var(--sim); }
-.pt.is-new .pt-ic { background: var(--panel); color: var(--new); }
-.pt-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.pt-text { font-size: 16px; font-weight: 500; line-height: 1.45; color: var(--ink); padding-top: 2px; }
+.pts-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border-radius: var(--r-m); box-shadow: var(--shadow-1); overflow: hidden; }
+.pt { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; padding: 12px 16px; background: var(--panel); }
+.pt + .pt { box-shadow: inset 0 1px 0 var(--line); }
+.pt-ic { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-top: 2px; border-radius: 999px; color: var(--dup); background: var(--dup-soft); }
+.pt-ic .ic { width: 12px; height: 12px; stroke-width: 2.4; }
+.pt.is-partial .pt-ic { color: var(--sim); background: var(--sim-soft); }
+.pt.is-new .pt-ic { color: var(--new); background: var(--new-soft); }
+.pt-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pt-text { font-size: 16px; line-height: 1.5; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; color: var(--ink-3); }
 .pt-tag { font-weight: 600; color: var(--dup); }
 .pt.is-partial .pt-tag { color: var(--sim); }
 .pt.is-new .pt-tag { color: var(--new); }
-.pt-ref { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border-radius: var(--r-s); background: var(--panel); color: var(--ink); font-size: 14px; box-shadow: var(--shadow-1); text-decoration: none; transition: box-shadow .15s, transform var(--dur-snappy) var(--spring-snappy); }
-.pt-ref .ic { width: 14px; height: 14px; }
-.pt-ref::after { content: ""; position: absolute; inset: -6px -2px; }
-button.pt-ref:hover, a.pt-ref:hover { box-shadow: var(--shadow-2); }
-button.pt-ref:active, a.pt-ref:active { transform: scale(.96); }
-.pt-title { min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.pt-quote { margin: 0; padding: 8px 12px; border-radius: var(--r-m); background: var(--panel); font-size: 14px; line-height: 1.5; color: var(--ink-2); box-shadow: inset 2px 0 0 var(--line-strong); }
+.pt-ref { position: relative; color: var(--accent-ink); font-size: 14px; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: text-decoration-color .15s; }
+.pt-ref::after { content: ""; position: absolute; inset: -10px -6px; }
+button.pt-ref:hover, a.pt-ref:hover { text-decoration-color: currentColor; }
+.pt-proof summary { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; font-size: 14px; color: var(--ink-3); cursor: pointer; list-style: none; }
+.pt-proof summary::-webkit-details-marker { display: none; }
+.pt-proof summary .ic { width: 14px; height: 14px; transition: transform var(--dur-snappy) var(--spring-snappy); }
+.pt-proof[open] summary .ic { transform: rotate(180deg); }
+.pt-proof summary:hover { color: var(--ink-2); }
+.pt-quote { margin: 4px 0 0; padding: 8px 12px; border-radius: var(--r-s); background: var(--bg); font-size: 14px; line-height: 1.5; color: var(--ink-2); }
 .pt-quote mark { padding: 0 2px; border-radius: 4px; background: var(--mark); color: var(--mark-ink); }
-@media (forced-colors: active) { .pt-bar i { background: Highlight; forced-color-adjust: none; } .pt { border: 1px solid ButtonText; } }
+@media (forced-colors: active) { .pts-list { border: 1px solid ButtonText; } }
 .hits { display: flex; flex-direction: column; border-radius: var(--r-m); box-shadow: var(--shadow-1); overflow: hidden; }
 .hit { position: relative; display: flex; align-items: stretch; background: var(--panel); transition: background-color .15s; }
 .hit + .hit { box-shadow: inset 0 1px 0 var(--line); }
@@ -810,10 +806,10 @@ sources: 'Quellen', country: 'Land', run: 'Abgleichen', running: 'Abgleich läuf
 too_short: 'Bitte beschreibe das Anliegen in einem ganzen Satz.', no_source: 'Bitte mindestens eine Quelle wählen.',
 step1: 'Suche nach Stichwörtern und nach Bedeutung', step2: 'Die besten Stellen werden sortiert', step3: 'Die Antwort wird zusammengestellt',
 duplicate: 'Duplikat', similar: 'Sehr ähnlich', related: 'Verwandt', fresh_lvl: 'Neu',
-pts_title: 'Was ist wirklich neu?', pts_ai: 'Zerlegt und geprüft von Gemini', pts_rule: 'Zerlegt nach Sätzen',
-pt_exists: 'Gibt es schon', pt_partial: 'Teilweise da', pt_new: 'Neu', pt_in: 'in', pt_to_draft: 'kommt in den Entwurf', pt_nothing: 'nichts Passendes gefunden',
+pts_title: 'Was ist wirklich neu?',
+pt_exists: 'Gibt es schon', pt_partial: 'Teilweise da', pt_new: 'Neu', pt_in: 'in', pt_to_draft: 'kommt in den Entwurf', pt_proof: 'Beleg zeigen',
 v_mixed: ['{k} von {n} Punkten gibt es schon.', '{k} von {n} Punkten gibt es schon.'], v_all_known: 'Alle {n} Punkte gibt es schon.',
-pts_bar: '{e} gibt es schon, {p} teilweise, {f} neu', pts_wish: 'Nur das Neue als Wunsch formulieren',
+pts_wish: 'Nur das Neue als Wunsch formulieren',
 draft_scope: ['Enthält nur den neuen Punkt. {k} bestehende stehen unter „Abgrenzung“ mit Verweis.', 'Enthält nur die {n} neuen Punkte. {k} bestehende stehen unter „Abgrenzung“ mit Verweis.'],
 draft_all_known: 'Alle Punkte gibt es schon. Ergänze lieber das vorhandene Ticket, statt ein neues anzulegen.',
 v_duplicate: 'Das gibt es sehr wahrscheinlich schon.', v_similar: 'Ähnliches ist schon da.', v_new: 'Dazu gibt es noch nichts.',
@@ -860,10 +856,10 @@ sources: 'Sources', country: 'Country', run: 'Check', running: 'Checking', keys:
 too_short: 'Please describe the request in a full sentence.', no_source: 'Please choose at least one source.',
 step1: 'Searching by keywords and by meaning', step2: 'Ordering the best passages', step3: 'Putting the answer together',
 duplicate: 'Duplicate', similar: 'Very similar', related: 'Related', fresh_lvl: 'New',
-pts_title: 'What is really new?', pts_ai: 'Split and checked by Gemini', pts_rule: 'Split by sentence',
-pt_exists: 'Exists', pt_partial: 'Partly there', pt_new: 'New', pt_in: 'in', pt_to_draft: 'goes into the draft', pt_nothing: 'nothing matching found',
+pts_title: 'What is really new?',
+pt_exists: 'Exists', pt_partial: 'Partly there', pt_new: 'New', pt_in: 'in', pt_to_draft: 'goes into the draft', pt_proof: 'Show evidence',
 v_mixed: ['{k} of {n} points already exists.', '{k} of {n} points already exist.'], v_all_known: 'All {n} points already exist.',
-pts_bar: '{e} exist, {p} partly, {f} new', pts_wish: 'Turn only the new part into a request',
+pts_wish: 'Turn only the new part into a request',
 draft_scope: ['Contains only the new point. {k} existing ones are listed under “Abgrenzung” with a link.', 'Contains only the {n} new points. {k} existing ones are listed under “Abgrenzung” with a link.'],
 draft_all_known: 'All points already exist. Better extend the existing ticket than create a new one.',
 v_duplicate: 'This very likely exists already.', v_similar: 'Something similar exists.', v_new: 'There is nothing on this yet.',
@@ -1056,35 +1052,30 @@ return String(quote).split(/([\p{L}\p{N}]+)/u).map(function (part, i) {
 return i % 2 && part.length >= 5 && stems[part.toLowerCase().slice(0, 5)] ? '<mark>' + esc(part) + '</mark>' : esc(part);
 }).join('');
 }
-function pointHtml(turn, it, i) {
+function pointHtml(turn, it) {
 var st = it.status === 'exists' || it.status === 'partial' ? it.status : 'new';
 var ic = st === 'exists' ? 'check' : st === 'partial' ? 'half' : 'plus';
 var ref = it.ref, meta = '<span class="pt-tag">' + t('pt_' + st) + '</span>';
 if (ref) {
-var label = icon(ref.source === 'confluence' ? 'confluence' : 'jira') + '<span class="mono">' + esc(ref.id) + '</span>';
-var url = safeUrl(ref.url);
+var label = '<span class="mono">' + esc(ref.id) + '</span>';
+var url = safeUrl(ref.url), tip = ' title="' + esc(ref.title) + '"';
 meta += '<span class="pt-in">' + t('pt_in') + '</span>' + (ref.hit >= 0
-? '<button type="button" class="pt-ref" data-turn="' + turn.id + '" data-hit="' + ref.hit + '" aria-label="' + esc(t('details', { id: ref.id })) + '">' + label + '</button>'
-: url ? '<a class="pt-ref" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : '<span class="pt-ref">' + label + '</span>') +
-'<span class="pt-title">' + esc(ref.title) + '</span>';
-} else {
-meta += '<span class="pt-in">' + t(turn.result.modus === 'wunsch' ? 'pt_to_draft' : 'pt_nothing') + '</span>';
+? '<button type="button" class="pt-ref" data-turn="' + turn.id + '" data-hit="' + ref.hit + '"' + tip + ' aria-label="' + esc(t('details', { id: ref.id })) + '">' + label + '</button>'
+: url ? '<a class="pt-ref" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer"' + tip + '>' + label + '</a>' : '<span class="pt-ref"' + tip + '>' + label + '</span>');
+} else if (turn.result.modus === 'wunsch') {
+meta += '<span class="pt-in">' + t('pt_to_draft') + '</span>';
 }
+var proof = ref && ref.quote ? '<details class="pt-proof"><summary>' + icon('chevron') + t('pt_proof') + '</summary><blockquote class="pt-quote">' + markQuote(ref.quote, it.text) + '</blockquote></details>' : '';
 return '<li class="pt is-' + st + '"><span class="pt-ic" aria-hidden="true">' + icon(ic) + '</span><div class="pt-main">' +
-'<p class="pt-text">' + esc(it.text) + '</p><div class="pt-meta">' + meta + '</div>' +
-(ref && ref.quote ? '<blockquote class="pt-quote">' + markQuote(ref.quote, it.text) + '</blockquote>' : '') + '</div></li>';
+'<p class="pt-text">' + esc(it.text) + '</p><div class="pt-meta">' + meta + '</div>' + proof + '</div></li>';
 }
 function pointsHtml(turn) {
 var r = turn.result, pc = ptCounts(r);
 if (!pc) return '';
-var items = r.points.items;
-var bar = '<div class="pt-bar" role="img" aria-label="' + esc(t('pts_bar', { e: num(pc.exists), p: num(pc.partial), f: num(pc.fresh) })) + '">' +
-items.map(function (it, i) { return '<i class="is-' + esc(it.status) + '" style="--d:' + Math.round(160 + 70 * Math.sqrt(i)) + 'ms"></i>'; }).join('') + '</div>';
 var wish = r.modus !== 'wunsch' && pc.fresh && pc.known
 ? '<div><button type="button" class="btn" data-as-wish="' + turn.id + '">' + icon('draft') + '<span>' + t('pts_wish') + '</span></button></div>' : '';
-return '<section class="sec pts" aria-labelledby="pts-h-' + turn.id + '"><div class="sec-head"><h3 id="pts-h-' + turn.id + '">' + icon('split') + t('pts_title') + '</h3>' +
-'<span class="fine">' + t(r.points.method === 'gemini' ? 'pts_ai' : 'pts_rule') + '</span></div>' + bar +
-'<ol class="pts-list">' + items.map(function (it, i) { return pointHtml(turn, it, i); }).join('') + '</ol>' +
+return '<section class="sec pts" aria-labelledby="pts-h-' + turn.id + '"><div class="sec-head"><h3 id="pts-h-' + turn.id + '">' + icon('split') + t('pts_title') + '</h3></div>' +
+'<ol class="pts-list">' + r.points.items.map(function (it) { return pointHtml(turn, it); }).join('') + '</ol>' +
 (r.points.note ? '<p class="fine">' + esc(r.points.note) + '</p>' : '') + wish + '</section>';
 }
 function hitHtml(turn, h, i) {

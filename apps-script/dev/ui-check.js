@@ -182,7 +182,7 @@ function audit() {
     await page.waitForSelector('[data-draft]', { timeout: 8000 }).catch(() => note('js', ['[data-draft]'], tag, 'Entwurf wurde nicht gezeichnet'));
     await page.waitForTimeout(1200);
     // Was ist wirklich neu? Punkte mit Beleg, neue Punkte markiert
-    const pts = await page.evaluate(() => { const last = [...document.querySelectorAll('.pts')].pop(); return last ? { n: last.querySelectorAll('.pt').length, fresh: last.querySelectorAll('.pt.is-new').length, marks: last.querySelectorAll('.pt-quote mark').length } : null; });
+    const pts = await page.evaluate(() => { const last = [...document.querySelectorAll('.pts')].pop(); return last ? { n: last.querySelectorAll('.pt').length, fresh: last.querySelectorAll('.pt.is-new').length, marks: last.querySelectorAll('.pt-quote mark').length, bar: last.querySelectorAll('.pt-bar').length } : null; });
     if (!pts || pts.n < 3 || !pts.fresh || !pts.marks) note('js', ['.pts'], tag, 'Punkte fehlen oder ohne Beleg: ' + JSON.stringify(pts));
     await page.click('[data-draft]');
     await page.waitForSelector('#insp .rich', { timeout: 8000 }).catch(() => note('js', ['.rich'], tag, 'Entwurf öffnet sich nicht'));
