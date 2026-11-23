@@ -91,6 +91,11 @@ def ui() -> Result:
     return _node("apps-script/dev/ui-check.js", "--bundle", tail=15)
 
 
+def motion() -> Result:
+    """Prüft die Bewegungs-Bibliothek (Federn, Morphs, reduzierte Bewegung) im Browser."""
+    return _node("apps-script/dev/motion-check.js", tail=4)
+
+
 def brand() -> Result:
     hits = []
     for path in tracked_files():

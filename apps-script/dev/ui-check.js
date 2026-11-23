@@ -1,6 +1,6 @@
 // Oberflächen-Prüfung im echten Browser (Playwright/Chromium):  node apps-script/dev/ui-check.js
 //
-// Alle Zustände (Start, Prüfen, Wunsch, Fehler, Daten), hell und dunkel, bei 1440, 1024 und 375 px Breite:
+// Alle Zustände (Start, Prüfen, Treffer, Wunsch mit Entwurf, Fehler, Daten), hell und dunkel, bei 1440, 1024 und 375 px Breite:
 //   xss       Testdaten und Eingaben enthalten HTML/Skript; nichts davon darf ausgeführt oder als Element erscheinen
 //   js        keine Skriptfehler im Browser
 //   text      keine Schrift unter 11 px
@@ -158,24 +158,39 @@ function audit() {
     await check(page, 'Start ' + tag);
     // Prüfen: Treffer aus den (bösartig präparierten) Testdaten, Eingabe selbst ebenfalls bösartig
     await page.fill('#text', 'Bestellvorschlag Feiertage Wareneingang Teillieferungen ' + EVIL);
-    await page.press('#text', 'Control+Enter');
-    await page.waitForSelector('#h-verdict', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Ergebnis wurde nicht gezeichnet'));
+    await page.press('#text', 'Enter');
+    await page.waitForSelector('[id^=h-verdict]', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Ergebnis wurde nicht gezeichnet'));
+    await page.waitForTimeout(1200);
     if (!(await page.locator('.hit').count())) note('js', ['.hit'], tag, 'keine Treffer gezeichnet');
     await check(page, 'Prüfen ' + tag);
+    // Treffer im Detailbereich
+    await page.click('.hit-main');
+    await page.waitForSelector('#insp:not([hidden]) #insp-title', { timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Detailbereich wurde nicht geöffnet'));
+    await page.waitForTimeout(700);
+    await check(page, 'Treffer ' + tag);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#insp[hidden]', { state: 'attached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Escape schließt den Detailbereich nicht'));
     // Wunsch: Stream, Entwurf, Vorbilder
-    await page.check('input[value=wunsch]', { force: true });
+    await page.click('label:has(input[value=wunsch])');
     await page.fill('#text', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen sichtbar bleiben. ' + EVIL);
     await page.click('#composer button[type=submit]');
-    await page.waitForSelector('#markup', { timeout: 8000 }).catch(() => note('js', ['#markup'], tag, 'Entwurf wurde nicht gezeichnet'));
+    await page.waitForSelector('[data-draft]', { timeout: 8000 }).catch(() => note('js', ['[data-draft]'], tag, 'Entwurf wurde nicht gezeichnet'));
+    await page.waitForTimeout(1200);
+    await page.click('[data-draft]');
+    await page.waitForSelector('#insp .rich', { timeout: 8000 }).catch(() => note('js', ['.rich'], tag, 'Entwurf öffnet sich nicht'));
+    await page.waitForTimeout(700);
     await check(page, 'Wunsch ' + tag);
-    // Zu kurze Eingabe: Fehlermeldung
+    await page.click('#insp [data-insp-close]');
+    await page.waitForSelector('#insp[hidden]', { state: 'attached', timeout: 8000 }).catch(() => note('js', ['#insp'], tag, 'Schließen-Knopf schließt den Detailbereich nicht'));
+    // Zu kurze Eingabe: Hinweis unter dem Feld, keine Anfrage
     await page.fill('#text', 'kurz');
     await page.click('#composer button[type=submit]');
-    await page.waitForSelector('#result [role=alert]', { timeout: 8000 }).catch(() => note('js', ['alert'], tag, 'Fehlermeldung fehlt'));
+    await page.waitForSelector('#hint.err', { timeout: 8000 }).catch(() => note('js', ['#hint'], tag, 'Hinweis bei zu kurzer Eingabe fehlt'));
     await check(page, 'Fehler ' + tag);
     // Daten
     await page.goto(base + '#/daten', { waitUntil: 'networkidle' });
     await page.waitForSelector('#h-advice', { timeout: 8000 }).catch(() => note('js', ['main'], tag, 'Datenseite wurde nicht gezeichnet'));
+    await page.waitForTimeout(900);
     await check(page, 'Daten ' + tag);
     // Tastatur: Umschalter und Knöpfe sind mit Tab erreichbar und zeigen einen Fokusring
     if (w === 1440 && theme === 'light' && lang === 'de') {
@@ -196,7 +211,7 @@ function audit() {
   await browser.close();
   server.close();
   const list = [...found.values()];
-  console.log(`${pagesChecked} Seitenansichten geprüft (Start, Prüfen, Wunsch, Fehler, Daten; hell/dunkel, ${WIDTHS.join('/')} px, Englisch)`);
+  console.log(`${pagesChecked} Seitenansichten geprüft (Start, Prüfen, Treffer, Wunsch, Fehler, Daten; hell/dunkel, ${WIDTHS.join('/')} px, Englisch)`);
   if (!list.length) { console.log('Keine Befunde'); return; }
   for (const f of list) console.log(`${f.rule.padEnd(8)} ${f.sel} ${f.msg}  [${f.where.slice(0, 3).join(', ')}${f.where.length > 3 ? ' …' : ''}]`);
   process.exitCode = 1;

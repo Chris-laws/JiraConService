@@ -3538,11 +3538,11 @@ var SCALES = ['Single Country', 'Multi-Country', 'Global'];
 var REQUIRED = [['title', 'Titel'], ['role', 'Rolle'], ['goal', 'Ziel'], ['benefit', 'Mehrwert'],
   ['current_state', 'Ausgangssituation'], ['criteria', 'Akzeptanzkriterien'], ['stream', 'Stream']];
 var EXAMPLES = [
-  ['Mindestbestand', 'Als Disponent möchte ich den Mindestbestand für Aktionsartikel vorübergehend überschreiben, damit die ' +
+  ['Mindestbestand für Aktionsartikel', 'Als Disponent möchte ich den Mindestbestand für Aktionsartikel vorübergehend überschreiben, damit die ' +
     'Filiale zum Aktionsstart genug Ware hat. Die Änderung muss nach Aktionsende automatisch zurückgesetzt werden.'],
-  ['Zwei Streams', 'Bei Lieferantenwechsel soll die Gebindegröße im Artikelstamm aktualisiert werden. Der Bestellvorschlag ' +
+  ['Gebindegröße nach Lieferantenwechsel', 'Bei Lieferantenwechsel soll die Gebindegröße im Artikelstamm aktualisiert werden. Der Bestellvorschlag ' +
     'soll die neue Gebindegröße bei der Bestellmenge nutzen, damit keine falschen Mengen bestellt werden.'],
-  ['Mögliches Duplikat', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen ' +
+  ['Teillieferungen im Wareneingang', 'Im Wareneingang sollen Teillieferungen einer Palette erfasst werden können, damit offene Restmengen ' +
     'sichtbar bleiben.']
 ];
 

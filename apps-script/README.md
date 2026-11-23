@@ -181,6 +181,22 @@ Bestände verteilen sich auf mehrere Läufe (2.500 Chunks je Lauf).
 Die früheren Seiten (Übersicht, Tickets, Bugs, Wissen …) sind aus der Oberfläche entfernt; ihr Server-Code bleibt
 vorerst, damit sie sich wieder einschalten lassen.
 
+### Aufbau der Oberfläche
+
+Die Oberfläche ist für den Browser am PC gebaut und folgt dem Muster heutiger KI-Assistenten:
+
+- **Links** die Seitenleiste: neue Anfrage, die beiden Seiten, der Verlauf (nur in diesem Browser gespeichert),
+  Sprache und helle oder dunkle Ansicht. Sie lässt sich einklappen.
+- **In der Mitte** das Gespräch: Am Anfang steht nur die Eingabe. Nach dem Senden rutscht sie nach unten, darüber
+  erscheinen die Frage und die Antwort: zuerst das Ergebnis in einem Satz, dann die Quellen mit Übereinstimmung, im
+  Wunsch-Modus zusätzlich Stream, Epic, Ticket-Entwurf und Vorbilder. Weitere Anfragen hängen sich unten an.
+- **Rechts** öffnet sich ein Treffer oder der Ticket-Entwurf mit allen Angaben. `Esc` schließt ihn wieder.
+
+Dateien in `src/`: `Index.html` (Rahmen), `Styles.html` (Farben, Maße, Aufbau), `Icons.html`, `JsMotion.html`
+(Bewegung: Federn, Morph-Übergänge, ohne fremde Bibliothek) und `JsApp.html` (zeichnet die Seiten und reagiert auf
+Eingaben). Bewegung richtet sich nach der Systemeinstellung „Bewegung reduzieren“. `dev/motion-check.js` prüft die
+Bewegungs-Bibliothek im Browser, `dev/ui-check.js` alle Ansichten.
+
 ## Nur lesen
 
 Diese Fassung schreibt nirgends hin. Abgesichert in mehreren Schichten:

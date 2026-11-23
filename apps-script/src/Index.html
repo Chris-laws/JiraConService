@@ -2,15 +2,17 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <!-- Schrift Figtree (OFL) von Google Fonts, blockiert den Aufbau nicht (media=print, danach all); bis sie da ist
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Schrift Geist (OFL) von Google Fonts, blockiert den Aufbau nicht (media=print, danach all); bis sie da ist
        und ohne Internet greift die Systemschrift. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400..800&display=swap" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" media="print" onload="this.media='all'">
   <?!= include('Styles') ?>
   <script>
-    var t = "light";
-    try { t = localStorage.getItem("theme") === "dark" ? "dark" : "light"; } catch (err) {}
+    var t = "";
+    try { t = localStorage.getItem("theme") || ""; } catch (err) {}
+    if (t !== "dark" && t !== "light") t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     document.documentElement.dataset.theme = t;
   </script>
 </head>
@@ -35,6 +37,7 @@
     window.BOOT.promise.catch(function () { /* Fehler zeigt JsApp, sobald es die Antwort abholt */ });
   })();
 </script>
+<?!= include('JsMotion') ?>
 <?!= include('JsApp') ?>
 </body>
 </html>

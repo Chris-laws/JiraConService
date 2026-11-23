@@ -1,92 +1,108 @@
 <script>
-// Oberfläche der schlanken Fassung: zwei Seiten (Abgleich, Daten). Der Server liefert nur Daten (apiRequest in Api.gs),
-// gezeichnet wird hier. Alles, was aus Jira, Confluence oder einer Eingabe stammt, läuft durch esc().
+// Oberfläche: ein Gespräch wie in einem KI-Assistenten. Links der Verlauf, in der Mitte Frage und Antwort mit Quellen,
+// rechts öffnet sich ein Treffer oder der Ticket-Entwurf. Der Server liefert nur Daten (apiRequest in Api.gs).
+// Alles, was aus Jira, Confluence oder einer Eingabe stammt, läuft durch esc(). Bewegung kommt aus JsMotion.
 (function () {
   'use strict';
 
   var TEXT = {
     de: {
-      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', recent: 'Zuletzt geprüft',
-      recent_empty: 'Deine letzten Anfragen stehen hier, nur in diesem Browser.', lang: 'Sprache', theme_dark: 'Dunkle Ansicht', theme_light: 'Helle Ansicht',
-      h_match: 'Gibt es das schon?', lede: 'Beschreibe dein Anliegen in eigenen Worten. Es wird mit allen Jira-Tickets und Confluence-Seiten verglichen.',
+      skip: 'Zum Inhalt', nav: 'Bereiche', match: 'Abgleich', data: 'Daten', fresh: 'Neue Anfrage', history: 'Verlauf',
+      history_empty: 'Deine Anfragen erscheinen hier. Sie bleiben in diesem Browser.', lang: 'Sprache', theme_dark: 'Dunkle Ansicht einschalten', theme_light: 'Helle Ansicht einschalten',
+      side_close: 'Seitenleiste einklappen', side_open: 'Seitenleiste ausklappen',
+      morning: 'Guten Morgen', day: 'Guten Tag', evening: 'Guten Abend', hero: 'Was möchtest du prüfen?',
       mode: 'Was möchtest du tun?', mode_check: 'Nur prüfen', mode_wish: 'Wunsch an International',
-      mode_check_hint: 'Zeigt, ob es das Thema schon gibt.', mode_wish_hint: 'Zeigt zusätzlich, wohin der Wunsch gehört, und schreibt den Ticket-Text vor.',
-      text_label: 'Dein Anliegen', placeholder: 'z. B. Der Bestellvorschlag soll Feiertage je Land berücksichtigen, damit vor Feiertagen nicht zu wenig bestellt wird.',
-      sources: 'Quellen', country: 'Land', run: 'Abgleichen', running: 'Abgleich läuft', try: 'Zum Ausprobieren',
-      step1: 'Suche nach Stichwörtern und nach Bedeutung …', step2: 'Reranker ordnet die besten Stellen …', step3: 'Ergebnis wird zusammengestellt …',
-      hits: 'Treffer', hit_one: '1 Treffer', hit_n: '{n} Treffer', no_hits: 'Nichts Passendes gefunden',
-      no_hits_hint: 'Zu diesem Anliegen gibt es weder ein Ticket noch eine Seite. Formuliere es ruhig mit den Fachbegriffen, die im Ticket stehen würden, und prüfe noch einmal.',
-      duplicate: 'Duplikat', similar: 'Sehr ähnlich', related: 'Verwandt', similarity: 'Ähnlichkeit {n} %',
-      by_keyword: 'Stichwörter', by_meaning: 'Bedeutung', more_spots: '+{n} weitere Stellen', open: 'Öffnen',
-      v_duplicate: 'Das gibt es sehr wahrscheinlich schon', v_similar: 'Ähnliches ist schon da', v_new: 'Dazu gibt es noch nichts',
-      v_duplicate_hint: 'Bitte zuerst dieses Ticket ansehen, statt ein neues zu schreiben:', v_similar_hint: 'Am nächsten liegt:',
-      v_new_hint: 'Kein Ticket und keine Seite ist diesem Anliegen wirklich ähnlich.',
-      counts: '{d} Duplikat, {s} sehr ähnlich, {r} verwandt', scale_new: 'neu', how: 'So wurde gesucht',
-      how_both: 'Stichwörter und Bedeutung', how_lex: 'nur Stichwörter', how_vec: 'nur Bedeutung',
-      rr_ranking: 'sortiert vom Reranker', rr_gemini: 'sortiert von Gemini', rr_none: 'ohne Reranker', spots: '{n} Stellen in {s} s',
-      stream: 'Wohin gehört das?', stream_tickets: 'Abgeleitet aus den ähnlichsten Tickets.', stream_profile: 'Geschätzt aus den Stream-Beschreibungen, weil kein ähnliches Ticket einen Stream trägt.',
-      stream_none: 'Aus den Daten lässt sich kein Stream ableiten.', like: 'wie', epic: 'Epic', votes_one: '1 Ticket', votes_n: '{n} Tickets',
-      draft: 'Ticket-Text für Jira', draft_ai: 'Mit KI formuliert', draft_rule: 'Ohne KI formuliert', copy: 'Text kopieren', copied: 'Kopiert', questions: 'Das fehlt noch',
-      guide: 'So schreiben ähnliche Tickets', guide_sections: 'Diese Abschnitte kommen dort vor', guide_none: 'ohne Überschriften', chars: '{n} Zeichen',
-      h_data: 'Was in den Daten steckt', data_lede: 'Längen und Aufbau der Tickets und Seiten. Daraus ergibt sich, wie groß die Chunks für die Suche sein sollten.',
-      recalc: 'Neu berechnen', store_bigquery: 'Auswertung über alle Daten in BigQuery', store_memory: 'Auswertung über die Daten im Speicher (ohne BigQuery)',
-      advice: 'Empfohlene Chunk-Größe', advice_ok: 'Deine Einstellung passt zu den Daten.', advice_change: 'Aktuell eingestellt: {c} Zeichen, {o} Überlappung.',
+      hint_check: 'Zeigt, ob es das Thema in Jira oder Confluence schon gibt.', hint_wish: 'Zeigt zusätzlich, in welchen Stream der Wunsch gehört, und schreibt den Ticket-Text vor.',
+      text_label: 'Dein Anliegen', placeholder: 'Beschreibe dein Anliegen in eigenen Worten …', placeholder_next: 'Nächstes Anliegen prüfen …',
+      sources: 'Quellen', country: 'Land', run: 'Abgleichen', running: 'Abgleich läuft', keys: 'Enter sendet, Umschalt + Enter macht eine neue Zeile',
+      too_short: 'Bitte beschreibe das Anliegen in einem ganzen Satz.', no_source: 'Bitte mindestens eine Quelle wählen.',
+      step1: 'Suche nach Stichwörtern und nach Bedeutung', step2: 'Die besten Stellen werden sortiert', step3: 'Die Antwort wird zusammengestellt',
+      duplicate: 'Duplikat', similar: 'Sehr ähnlich', related: 'Verwandt', fresh_lvl: 'Neu',
+      v_duplicate: 'Das gibt es sehr wahrscheinlich schon.', v_similar: 'Ähnliches ist schon da.', v_new: 'Dazu gibt es noch nichts.',
+      p_duplicate: 'Am nächsten liegt {c} <b>{id}</b> „{title}“. Sieh dir das bitte zuerst an, bevor du ein neues Ticket schreibst.',
+      p_similar: 'Am nächsten liegt {c} <b>{id}</b> „{title}“. Es ist kein Duplikat, behandelt aber ein sehr ähnliches Thema.',
+      p_new: 'Kein Ticket und keine Seite ist diesem Anliegen wirklich ähnlich.', p_new_rel: 'Am Rand verwandt ist {c} <b>{id}</b> „{title}“.',
+      p_counts: 'Insgesamt gefunden: {list}.', n_dup: ['1 Duplikat', '{n} Duplikate'], n_sim: ['1 sehr ähnlicher Eintrag', '{n} sehr ähnliche Einträge'], n_rel: ['1 verwandter Eintrag', '{n} verwandte Einträge'], and: 'und',
+      p_stream: 'Der Wunsch gehört am ehesten in den Stream <b>{name}</b> ({n} %).', p_epic: 'Passendes Epic: <b>{id}</b>.',
+      how_both: 'Stichwörter und Bedeutung', how_lex: 'Nur Stichwörter', how_vec: 'Nur Bedeutung',
+      rr_ranking: 'Reranker', rr_gemini: 'Sortiert von Gemini', rr_none: 'Ohne Reranker', spots: '{n} Stellen in {s}',
+      hits: 'Quellen', show_all: 'Alle {n} zeigen', show_less: 'Weniger zeigen', no_hits: 'Nichts Passendes gefunden',
+      no_hits_hint: 'Versuch es mit den Fachbegriffen, die in einem Ticket stehen würden.', open_in: 'In {s} öffnen', details: 'Details zu {id}',
+      stream: 'Wohin gehört das?', stream_tickets: 'Abgeleitet aus den ähnlichsten Tickets', stream_profile: 'Geschätzt aus den Stream-Beschreibungen',
+      stream_none: 'Aus den Daten lässt sich kein Stream ableiten.', like: 'wie {ids}', epic: 'Epic',
+      draft: 'Ticket-Entwurf', draft_ai: 'Mit KI formuliert', draft_rule: 'Ohne KI formuliert', draft_open: 'Entwurf ansehen', copy: 'Für Jira kopieren', copied: 'Kopiert', how: 'Wie wurde gesucht?', as_wish: 'Als Wunsch an International formulieren', today: 'Heute', earlier: 'Früher', land: 'Land', match_word: 'Übereinstimmung', copied_toast: 'Ticket-Text kopiert',
+      questions: 'Das fehlt noch', guide: 'So schreiben ähnliche Tickets', guide_sections: 'Übliche Abschnitte', chars: '{n} Zeichen',
+      close: 'Details schließen', status: 'Status', space: 'Bereich', updated: 'Geändert', match_pct: 'Übereinstimmung', found_by: 'Gefunden über', by_keyword: 'Stichwörter', by_meaning: 'Bedeutung',
+      passages: 'Passende Stellen', more_spots: 'und {n} weitere Stellen', jira: 'Jira', confluence: 'Confluence',
+      h_data: 'Was in den Daten steckt', data_lede: 'Länge und Aufbau der Tickets und Seiten. Daraus ergibt sich, wie groß die Textstücke für die Suche sein sollten.',
+      recalc: 'Neu berechnen', store_bigquery: 'Alle Daten in BigQuery', store_memory: 'Daten im Speicher',
+      advice: 'Empfohlene Chunk-Größe', advice_ok: 'Deine Einstellung passt zu den Daten.', advice_change: 'Eingestellt sind {c} Zeichen mit {o} Überlappung.',
       advice_how: 'Umstellen: in den Skripteigenschaften CHUNK_CHARS = {c} und CHUNK_OVERLAP = {o} setzen, dann im Editor abgleichVoll ausführen.',
-      chars_unit: 'Zeichen', overlap: 'Überlappung', est: 'Erwartet rund {n} Chunks. Bis alles eingebettet ist, braucht der Abgleich etwa so viele Läufe: {r}.',
-      jira: 'Jira-Tickets', confluence: 'Confluence-Seiten', entries: 'Einträge', chunks: 'Chunks', embedded: 'davon mit Vektor',
-      length: 'Textlänge in Zeichen', median: 'Median', p90: '90 % bis', longest: 'längster', chunk_mark: 'Chunk {n}',
-      strip_alt: 'Die Hälfte der Texte ist höchstens {m} Zeichen lang, 90 % höchstens {p}. Ein Chunk fasst {c} Zeichen.',
-      empty: 'ohne Text', dup_titles: 'doppelte Titel', with_headings: 'mit Überschriften', sec_per: 'Überschriften je Eintrag (Median)',
-      sec_len: 'Abschnittslänge (50 / 75 / 90 %)', one_chunk: 'passen in einen Chunk', sample: 'Stichprobe {n}',
-      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence-Bereiche', sync: 'Letzter Abgleich', sync_none: 'Noch kein Abgleich gelaufen. Im Editor abgleichEinrichten ausführen.',
+      chars_unit: 'Zeichen je Chunk', overlap: '{n} Zeichen Überlappung', est: 'Erwartet werden rund {n} Chunks, verteilt auf etwa {r} Abgleichsläufe.',
+      jira_docs: 'Jira-Tickets', confluence_docs: 'Confluence-Seiten', entries: 'Einträge', chunks: 'Chunks', embedded: 'mit Vektor',
+      length: 'Textlänge in Zeichen', median: 'Median', p90: '90 % bis', longest: 'Längster Text', chunk_mark: 'Chunk {n}',
+      strip_alt: 'Die Hälfte der Texte hat höchstens {m} Zeichen, 90 % höchstens {p}. Ein Chunk fasst {c} Zeichen.',
+      empty: 'Ohne Text', dup_titles: 'Doppelte Titel', with_headings: 'Mit Überschriften', sec_per: 'Überschriften je Eintrag', sec_len: 'Abschnittslänge (50 / 75 / 90 %)', one_chunk: 'Passen in einen Chunk', sample: 'Stichprobe {n}',
+      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence-Bereiche', sync: 'Letzter Abgleich', sync_ok: 'In Ordnung', sync_bad: 'Fehlgeschlagen', sync_none: 'Noch kein Abgleich gelaufen. Im Editor abgleichEinrichten ausführen.',
       no_data: 'Noch keine Daten', no_data_hint: 'Sobald der Abgleich gelaufen ist, steht hier die Auswertung.',
-      failed: 'Das hat nicht geklappt', retry: 'Erneut versuchen', loading: 'Wird geladen …'
+      failed: 'Das hat nicht geklappt', retry: 'Erneut versuchen', loading: 'Wird geladen'
     },
     en: {
-      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', recent: 'Recently checked',
-      recent_empty: 'Your latest requests appear here, in this browser only.', lang: 'Language', theme_dark: 'Dark view', theme_light: 'Light view',
-      h_match: 'Does this already exist?', lede: 'Describe your request in your own words. It is compared with every Jira ticket and Confluence page.',
+      skip: 'Skip to content', nav: 'Sections', match: 'Check', data: 'Data', fresh: 'New request', history: 'History',
+      history_empty: 'Your requests appear here. They stay in this browser.', lang: 'Language', theme_dark: 'Switch to dark view', theme_light: 'Switch to light view',
+      side_close: 'Collapse sidebar', side_open: 'Expand sidebar',
+      morning: 'Good morning', day: 'Good afternoon', evening: 'Good evening', hero: 'What would you like to check?',
       mode: 'What would you like to do?', mode_check: 'Check only', mode_wish: 'Request to International',
-      mode_check_hint: 'Shows whether the topic already exists.', mode_wish_hint: 'Also shows where the request belongs and drafts the ticket text.',
-      text_label: 'Your request', placeholder: 'e.g. The order proposal should consider public holidays per country so stores do not under-order before a holiday.',
-      sources: 'Sources', country: 'Country', run: 'Check', running: 'Checking', try: 'Try an example',
-      step1: 'Searching by keywords and by meaning …', step2: 'Reranker is ordering the best passages …', step3: 'Putting the result together …',
-      hits: 'Matches', hit_one: '1 match', hit_n: '{n} matches', no_hits: 'Nothing suitable found',
-      no_hits_hint: 'There is no ticket or page on this request. Try the technical terms a ticket would use and check again.',
-      duplicate: 'Duplicate', similar: 'Very similar', related: 'Related', similarity: 'Similarity {n}%',
-      by_keyword: 'Keywords', by_meaning: 'Meaning', more_spots: '+{n} more passages', open: 'Open',
-      v_duplicate: 'This very likely exists already', v_similar: 'Something similar exists', v_new: 'Nothing on this yet',
-      v_duplicate_hint: 'Please look at this ticket first instead of writing a new one:', v_similar_hint: 'The closest one is:',
-      v_new_hint: 'No ticket and no page is really similar to this request.',
-      counts: '{d} duplicate, {s} very similar, {r} related', scale_new: 'new', how: 'How it was searched',
-      how_both: 'keywords and meaning', how_lex: 'keywords only', how_vec: 'meaning only',
-      rr_ranking: 'ordered by the reranker', rr_gemini: 'ordered by Gemini', rr_none: 'no reranker', spots: '{n} passages in {s} s',
-      stream: 'Where does it belong?', stream_tickets: 'Derived from the most similar tickets.', stream_profile: 'Estimated from the stream descriptions because no similar ticket carries a stream.',
-      stream_none: 'The data does not suggest a stream.', like: 'like', epic: 'Epic', votes_one: '1 ticket', votes_n: '{n} tickets',
-      draft: 'Ticket text for Jira', draft_ai: 'Written with AI', draft_rule: 'Written without AI', copy: 'Copy text', copied: 'Copied', questions: 'Still missing',
-      guide: 'How similar tickets are written', guide_sections: 'Sections used there', guide_none: 'no headings', chars: '{n} characters',
-      h_data: 'What is in the data', data_lede: 'Length and structure of tickets and pages. This tells how large the passages for search should be.',
-      recalc: 'Recalculate', store_bigquery: 'Analysis of all data in BigQuery', store_memory: 'Analysis of the data in memory (no BigQuery)',
-      advice: 'Recommended chunk size', advice_ok: 'Your setting fits the data.', advice_change: 'Current setting: {c} characters, {o} overlap.',
+      hint_check: 'Shows whether the topic already exists in Jira or Confluence.', hint_wish: 'Also shows which stream the request belongs to and drafts the ticket text.',
+      text_label: 'Your request', placeholder: 'Describe your request in your own words …', placeholder_next: 'Check the next request …',
+      sources: 'Sources', country: 'Country', run: 'Check', running: 'Checking', keys: 'Enter sends, Shift + Enter adds a line',
+      too_short: 'Please describe the request in a full sentence.', no_source: 'Please choose at least one source.',
+      step1: 'Searching by keywords and by meaning', step2: 'Ordering the best passages', step3: 'Putting the answer together',
+      duplicate: 'Duplicate', similar: 'Very similar', related: 'Related', fresh_lvl: 'New',
+      v_duplicate: 'This very likely exists already.', v_similar: 'Something similar exists.', v_new: 'There is nothing on this yet.',
+      p_duplicate: 'The closest one is {c} <b>{id}</b> “{title}”. Please look at it first before writing a new ticket.',
+      p_similar: 'The closest one is {c} <b>{id}</b> “{title}”. It is not a duplicate but covers a very similar topic.',
+      p_new: 'No ticket and no page is really similar to this request.', p_new_rel: 'Loosely related: {c} <b>{id}</b> “{title}”.',
+      p_counts: 'Found in total: {list}.', n_dup: ['1 duplicate', '{n} duplicates'], n_sim: ['1 very similar entry', '{n} very similar entries'], n_rel: ['1 related entry', '{n} related entries'], and: 'and',
+      p_stream: 'The request most likely belongs to the stream <b>{name}</b> ({n}%).', p_epic: 'Matching epic: <b>{id}</b>.',
+      how_both: 'Keywords and meaning', how_lex: 'Keywords only', how_vec: 'Meaning only',
+      rr_ranking: 'Reranker', rr_gemini: 'Ordered by Gemini', rr_none: 'No reranker', spots: '{n} passages in {s}',
+      hits: 'Sources', show_all: 'Show all {n}', show_less: 'Show fewer', no_hits: 'Nothing suitable found',
+      no_hits_hint: 'Try the technical terms a ticket would use.', open_in: 'Open in {s}', details: 'Details for {id}',
+      stream: 'Where does it belong?', stream_tickets: 'Derived from the most similar tickets', stream_profile: 'Estimated from the stream descriptions',
+      stream_none: 'The data does not suggest a stream.', like: 'like {ids}', epic: 'Epic',
+      draft: 'Ticket draft', draft_ai: 'Written with AI', draft_rule: 'Written without AI', draft_open: 'View draft', copy: 'Copy for Jira', copied: 'Copied', how: 'How was this searched?', as_wish: 'Write it as a request to International', today: 'Today', earlier: 'Earlier', land: 'Country', match_word: 'match', copied_toast: 'Ticket text copied',
+      questions: 'Still missing', guide: 'How similar tickets are written', guide_sections: 'Common sections', chars: '{n} characters',
+      close: 'Close details', status: 'Status', space: 'Space', updated: 'Updated', match_pct: 'Match', found_by: 'Found by', by_keyword: 'keywords', by_meaning: 'meaning',
+      passages: 'Matching passages', more_spots: 'and {n} more passages', jira: 'Jira', confluence: 'Confluence',
+      h_data: 'What is in the data', data_lede: 'Length and structure of tickets and pages. This tells how large the text pieces for search should be.',
+      recalc: 'Recalculate', store_bigquery: 'All data in BigQuery', store_memory: 'Data in memory',
+      advice: 'Recommended chunk size', advice_ok: 'Your setting fits the data.', advice_change: 'The current setting is {c} characters with {o} overlap.',
       advice_how: 'To change: set CHUNK_CHARS = {c} and CHUNK_OVERLAP = {o} in the script properties, then run abgleichVoll in the editor.',
-      chars_unit: 'characters', overlap: 'overlap', est: 'About {n} chunks expected. Sync runs needed until everything is embedded: about {r}.',
-      jira: 'Jira tickets', confluence: 'Confluence pages', entries: 'entries', chunks: 'chunks', embedded: 'with a vector',
-      length: 'Text length in characters', median: 'Median', p90: '90% up to', longest: 'longest', chunk_mark: 'Chunk {n}',
+      chars_unit: 'characters per chunk', overlap: '{n} characters overlap', est: 'About {n} chunks expected, spread over roughly {r} sync runs.',
+      jira_docs: 'Jira tickets', confluence_docs: 'Confluence pages', entries: 'entries', chunks: 'chunks', embedded: 'with a vector',
+      length: 'Text length in characters', median: 'Median', p90: '90% up to', longest: 'Longest text', chunk_mark: 'Chunk {n}',
       strip_alt: 'Half of the texts have at most {m} characters, 90% at most {p}. One chunk holds {c} characters.',
-      empty: 'without text', dup_titles: 'duplicate titles', with_headings: 'with headings', sec_per: 'Headings per entry (median)',
-      sec_len: 'Section length (50 / 75 / 90%)', one_chunk: 'fit into one chunk', sample: 'Sample of {n}',
-      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence spaces', sync: 'Last sync', sync_none: 'No sync has run yet. Run abgleichEinrichten in the editor.',
+      empty: 'Without text', dup_titles: 'Duplicate titles', with_headings: 'With headings', sec_per: 'Headings per entry', sec_len: 'Section length (50 / 75 / 90%)', one_chunk: 'Fit into one chunk', sample: 'Sample of {n}',
+      g_stream: 'Streams', g_status: 'Status', g_space: 'Confluence spaces', sync: 'Last sync', sync_ok: 'OK', sync_bad: 'Failed', sync_none: 'No sync has run yet. Run abgleichEinrichten in the editor.',
       no_data: 'No data yet', no_data_hint: 'The analysis appears here once the sync has run.',
-      failed: 'That did not work', retry: 'Try again', loading: 'Loading …'
+      failed: 'That did not work', retry: 'Try again', loading: 'Loading'
     }
   };
+
+  var P = Promise.resolve();
+  var M = window.Motion || { reduced: function () { return true; }, init: function () {}, enter: function () { return P; }, exit: function () { return P; },
+    flip: function (r, fn) { fn(); return P; }, morph: function (fn) { return Promise.resolve(fn()); }, pill: function () {},
+    count: function (el, to, o) { el.textContent = o && o.format ? o.format(to) : String(to); }, swap: function (el, h) { el.innerHTML = h; return P; }, words: function () { return P; } };
 
   var store = {
     get: function (k, fallback) { try { var v = localStorage.getItem(k); return v === null ? fallback : v; } catch (e) { return fallback; } },
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ohne Speicher */ } }
   };
-  var S = { path: '/abgleich', ctx: null, lang: store.get('lang', 'de') === 'en' ? 'en' : 'de', busy: false, fatal: '', step: 0,
+  var S = { path: '/abgleich', ctx: null, lang: store.get('lang', 'de') === 'en' ? 'en' : 'de', side: store.get('side', 'open') === 'closed' ? 'closed' : 'open',
+    busy: false, fatal: '', seq: 0, turns: [], insp: null, data: { ctx: null, busy: false, error: '' },
     form: { text: '', modus: 'pruefen', country: '', quellen: ['jira', 'confluence'] } };
+  var SHOWN = 4;
 
   function t(key, vars) {
     var s = (TEXT[S.lang] && TEXT[S.lang][key]) || TEXT.de[key] || key;
@@ -95,13 +111,23 @@
   function esc(v) {
     return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function plural(key, n) {
+    var forms = (TEXT[S.lang] && TEXT[S.lang][key]) || TEXT.de[key];
+    return forms[n === 1 ? 0 : 1].replace('{n}', num(n));
+  }
+  function took(ms) {
+    ms = Math.max(0, +ms || 0);
+    return ms < 1000 ? num(Math.round(ms)) + ' ms' : (ms / 1000).toLocaleString(S.lang === 'en' ? 'en-GB' : 'de-DE', { maximumFractionDigits: 1 }) + ' s';
+  }
+  function calm(v) { v = String(v || ''); return v && v === v.toUpperCase() ? v.charAt(0) + v.slice(1).toLowerCase() : v; }
   function num(n) { return Number(n || 0).toLocaleString(S.lang === 'en' ? 'en-GB' : 'de-DE'); }
   function icon(name) { return '<svg class="ic" aria-hidden="true" focusable="false"><use href="#i-' + name + '"/></svg>'; }
   function safeUrl(u) { return /^https?:\/\//i.test(String(u || '')) ? String(u) : ''; }
-  function link(url, label, cls) {
-    var u = safeUrl(url);
-    return u ? '<a class="' + (cls || '') + '" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : '<span class="' + (cls || '') + '">' + label + '</span>';
-  }
+  function $(id) { return document.getElementById(id); }
+  function raf(fn) { if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fn); else fn(); }
+  function msg(e) { return e && e.message ? e.message : String(e); }
+  function turnById(id) { return S.turns.filter(function (x) { return x.id === +id; })[0] || null; }
+  function srcName(s) { return s === 'confluence' ? t('confluence') : t('jira'); }
 
   function api(method, path, params) {
     return new Promise(function (resolve, reject) {
@@ -114,153 +140,199 @@
     });
   }
 
-  // ---------- Zuletzt geprüft (nur in diesem Browser) ----------
+  // ---------- Verlauf (nur in diesem Browser) ----------
 
-  function recent() { try { var l = JSON.parse(store.get('recent', '[]')); return Array.isArray(l) ? l.slice(0, 8) : []; } catch (e) { return []; } }
-  function remember(form, level) {
-    var list = recent().filter(function (r) { return r.text !== form.text; });
-    list.unshift({ text: form.text.slice(0, 600), modus: form.modus, level: level });
-    store.set('recent', JSON.stringify(list.slice(0, 8)));
+  function history() { try { var l = JSON.parse(store.get('verlauf', '[]')); return Array.isArray(l) ? l.slice(0, 30) : []; } catch (e) { return []; } }
+  function remember(form, level, result) {
+    var list = history().filter(function (r) { return r.text !== form.text || r.modus !== form.modus; });
+    list.unshift({ text: form.text.slice(0, 600), modus: form.modus, country: form.country, quellen: form.quellen, level: level, at: Date.now(), result: result || null });
+    list = list.slice(0, 30);
+    // Ergebnisse nur bei den neuesten 12 aufheben; reicht der Platz nicht, ohne Ergebnisse speichern
+    list.forEach(function (r, i) { if (i >= 12) r.result = null; });
+    try { localStorage.setItem('verlauf', JSON.stringify(list)); }
+    catch (e) { list.forEach(function (r) { r.result = null; }); store.set('verlauf', JSON.stringify(list)); }
   }
 
-  // ---------- Rahmen ----------
+  // ---------- Seitenleiste ----------
 
-  function shell(main) {
-    var nav = [['/abgleich', 'search', t('match')], ['/daten', 'data', t('data')]].map(function (n) {
-      return '<a class="nav-link" href="#' + n[0] + '"' + (S.path === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[1]) + '<span>' + n[2] + '</span></a>';
+  function histHtml() {
+    var list = history();
+    if (!list.length) return '<p class="hist-empty">' + t('history_empty') + '</p>';
+    var day = new Date(); day.setHours(0, 0, 0, 0);
+    var group = '';
+    return '<ul class="hist-list">' + list.map(function (r, i) {
+      var g = r.at && r.at >= day.getTime() ? 'today' : 'earlier', head = g !== group ? '<li class="hist-group">' + t(g) + '</li>' : '';
+      group = g;
+      return head + '<li><button type="button" class="hist-item" data-hist="' + i + '" title="' + esc(r.text) + '"><span class="dot lvl-' + esc(r.level || 'new') + '" aria-hidden="true"></span><span><span class="sr-only">' + t(r.level === 'duplicate' || r.level === 'similar' ? r.level : 'fresh_lvl') + ': </span>' + esc(r.text) + '</span></button></li>';
+    }).join('') + '</ul>';
+  }
+
+  function sideHtml() {
+    var dark = document.documentElement.dataset.theme === 'dark', open = S.side === 'open';
+    var nav = [['/abgleich', 'chat', t('match')], ['/daten', 'data', t('data')]].map(function (n) {
+      return '<a href="#' + n[0] + '" aria-label="' + n[2] + '" title="' + n[2] + '"' + (S.path === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[1]) + '<span>' + n[2] + '</span></a>';
     }).join('');
-    var list = recent();
-    var rec = list.length ? '<ul class="recent-list">' + list.map(function (r, i) {
-      return '<li><button type="button" class="recent-item" data-recent="' + i + '"><span class="dot lvl-' + esc(r.level || 'new') + '" aria-hidden="true"></span><span class="recent-text">' + esc(r.text) + '</span></button></li>';
-    }).join('') + '</ul>' : '<p class="recent-empty">' + t('recent_empty') + '</p>';
-    var dark = document.documentElement.dataset.theme === 'dark';
-    return '<a class="skip" href="#main">' + t('skip') + '</a><div class="shell">' +
-      '<aside class="rail"><div class="brand"><img src="' + MARK_SRC + '" alt="" width="30" height="30"><span>' + esc(window.APP_NAME || '') + '</span></div>' +
-      '<nav class="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
-      '<section class="recent" aria-labelledby="h-recent"><h2 id="h-recent">' + t('recent') + '</h2>' + rec + '</section>' +
-      '<div class="rail-foot"><div class="lang" role="group" aria-label="' + t('lang') + '">' +
-      ['de', 'en'].map(function (l) { return '<button type="button" data-lang="' + l + '" aria-pressed="' + (S.lang === l) + '">' + l.toUpperCase() + '</button>'; }).join('') + '</div>' +
-      '<button type="button" class="icon-btn" data-theme-toggle aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '" title="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button></div></aside>' +
-      '<main id="main" class="main" tabindex="-1">' + main + '</main></div>';
+    return '<div class="side-head"><div class="brand"><img src="' + MARK_SRC + '" alt="" width="28" height="28"><span>' + esc(window.APP_NAME || '') + '</span></div>' +
+      '<button type="button" class="icon-btn" data-side-toggle aria-expanded="' + open + '" aria-label="' + t(open ? 'side_close' : 'side_open') + '">' + icon('panel') + '</button></div>' +
+      '<button type="button" class="new-btn" data-new aria-label="' + t('fresh') + '" title="' + t('fresh') + '">' + icon('plus') + '<span>' + t('fresh') + '</span></button>' +
+      '<nav class="nav" id="nav" aria-label="' + t('nav') + '">' + nav + '</nav>' +
+      '<section class="hist" aria-labelledby="h-hist"><h2 id="h-hist">' + t('history') + '</h2><div id="hist">' + histHtml() + '</div></section>' +
+      '<div class="side-foot"><div class="seg" id="lang" role="group" aria-label="' + t('lang') + '">' +
+      '<button type="button" class="seg-btn" data-lang="de" aria-pressed="' + (S.lang === 'de') + '">DE</button><button type="button" class="seg-btn" data-lang="en" aria-pressed="' + (S.lang === 'en') + '">EN</button></div>' +
+      '<button type="button" class="icon-btn" data-theme-toggle id="theme" aria-label="' + t(dark ? 'theme_light' : 'theme_dark') + '">' + icon(dark ? 'sun' : 'moon') + '</button></div>';
   }
 
-  function banner(lines) {
-    lines = (lines || []).filter(String);
-    return lines.length ? '<div class="banner" role="status">' + icon('alert') + '<div>' + lines.map(function (l) { return '<p>' + esc(l) + '</p>'; }).join('') + '</div></div>' : '';
+  // ---------- Eingabe ----------
+
+  function composerHtml(empty) {
+    var f = S.form, wish = f.modus === 'wunsch';
+    var countries = (S.ctx && S.ctx.countries) || [];
+    var tog = function (v) {
+      return '<label class="tog"><input type="checkbox" name="quelle" value="' + v + '"' + (f.quellen.indexOf(v) >= 0 ? ' checked' : '') + '><svg class="ic chk" aria-hidden="true" focusable="false"><use href="#i-check"/></svg><svg class="ic src" aria-hidden="true" focusable="false"><use href="#i-' + v + '"/></svg><span>' + srcName(v) + '</span></label>';
+    };
+    var radio = function (v, label) { return '<label><input type="radio" name="modus" value="' + v + '"' + (f.modus === v ? ' checked' : '') + '><span>' + label + '</span></label>'; };
+    return '<form class="composer" id="composer" novalidate><label class="sr-only" for="text">' + t('text_label') + '</label>' +
+      '<textarea id="text" name="text" rows="1" maxlength="6000" aria-describedby="hint" placeholder="' + t(empty ? 'placeholder' : 'placeholder_next') + '">' + esc(f.text) + '</textarea>' +
+      '<div class="composer-bar"><div class="bar-left"><div class="seg" id="mode" role="radiogroup" aria-label="' + t('mode') + '">' + radio('pruefen', t('mode_check')) + radio('wunsch', t('mode_wish')) + '</div>' +
+      '<div class="chips" role="group" aria-label="' + t('sources') + '">' + tog('jira') + tog('confluence') + '</div>' +
+      '<span class="sel has-pre" id="country-box"' + (wish && countries.length ? '' : ' hidden') + '><label class="sel-pre" for="country">' + t('land') + '</label><select id="country" name="country">' +
+      countries.map(function (c) { return '<option' + (c === f.country ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>' + icon('chevron') + '</span></div>' +
+      '<button type="submit" class="send" id="send" aria-label="' + t(S.busy ? 'running' : 'run') + '"' + (S.busy ? ' disabled' : '') + '>' +
+      (S.busy ? '<span class="spinner" aria-hidden="true"></span>' : icon('send')) + '</button></div></form>' +
+      '<p class="dock-note"><span id="hint" aria-live="polite">' + t(wish ? 'hint_wish' : 'hint_check') + '</span><span class="keys">' + t('keys') + '</span></p>';
+  }
+
+  // ---------- Antwort ----------
+
+  function lvlChip(level) {
+    var key = level === 'duplicate' || level === 'similar' || level === 'related' ? level : 'new';
+    return '<span class="lvl-chip lvl-' + key + '"><span class="dot" aria-hidden="true"></span>' + t(key === 'new' ? 'fresh_lvl' : key) + '</span>';
+  }
+  function cite(turn, i) {
+    return '<button type="button" class="cite" data-nowords data-turn="' + turn.id + '" data-hit="' + i + '" aria-label="' + esc(t('details', { id: turn.result.hits[i].id })) + '">' + (i + 1) + '</button>';
+  }
+
+  function proseHtml(turn) {
+    var r = turn.result, v = r.verdict, hits = r.hits || [];
+    var level = v.level === 'duplicate' || v.level === 'similar' ? v.level : 'new';
+    var topIdx = 0;
+    hits.forEach(function (h, i) { if (v.top && h.id === v.top.id) topIdx = i; });
+    var top = hits[topIdx];
+    var vars = top ? { c: cite(turn, topIdx), id: esc(top.id), title: esc(top.title), n: num(top.score) } : null;
+    var p = level === 'new' ? t('p_new') + (top ? ' ' + t('p_new_rel', vars) : '') : (top ? t('p_' + level, vars) : '');
+    var parts = [['n_dup', v.duplicates], ['n_sim', v.similar], ['n_rel', v.related]].filter(function (x) { return x[1] > 0; }).map(function (x) { return plural(x[0], x[1]); });
+    if (parts.length > 1) p += ' ' + t('p_counts', { list: parts.slice(0, -1).join(', ') + ' ' + t('and') + ' ' + parts[parts.length - 1] });
+    var out = '<p class="prose">' + p + '</p>';
+    if (r.modus === 'wunsch' && r.streams && r.streams.length) {
+      out += '<p class="prose">' + t('p_stream', { name: esc(r.streams[0].name), n: num(r.streams[0].share) }) +
+        (r.epics && r.epics.length ? ' ' + t('p_epic', { id: esc(r.epics[0].name || r.epics[0].id) }) : '') + '</p>';
+    }
+    var url = top && level !== 'new' ? safeUrl(top.url) : '';
+    var next = url ? '<a class="btn btn-primary" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + icon('out') + '<span>' + esc(t('open_in', { s: srcName(top.source) }) + ': ' + top.id) + '</span></a>' : '';
+    if (level === 'new' && r.modus !== 'wunsch') next = '<button type="button" class="btn btn-primary" data-as-wish="' + turn.id + '">' + icon('draft') + '<span>' + t('as_wish') + '</span></button>';
+    return '<div class="verdict">' + lvlChip(level) + '<h2 id="h-verdict-' + turn.id + '" tabindex="-1">' + t('v_' + level) + '</h2>' + out + (next ? '<div class="next">' + next + '</div>' : '') + '</div>';
+  }
+
+  function hitHtml(turn, h, i) {
+    var open = S.insp && S.insp.turn === turn.id && S.insp.kind === 'hit' && S.insp.i === i;
+    var bits = [h.id, h.source === 'jira' ? (h.stream && S.ctx && S.ctx.stream_names && S.ctx.stream_names[h.stream]) || h.stream : h.space, calm(h.status)]
+      .filter(Boolean).map(function (b, k) { return '<span' + (k === 0 ? ' class="mono"' : '') + '>' + esc(b) + '</span>'; }).join('<span aria-hidden="true">·</span>');
+    var text = h.passages && h.passages[0] ? h.passages[0].text : '';
+    var url = safeUrl(h.url);
+    return '<li class="hit' + (open ? ' is-open' : '') + '" data-flip="hit-' + turn.id + '-' + i + '" data-flip-text data-hit-row="' + turn.id + '-' + i + '">' +
+      '<button type="button" class="hit-main" data-turn="' + turn.id + '" data-hit="' + i + '" aria-expanded="' + !!open + '"><span class="hit-no" aria-hidden="true">' + (i + 1) + '</span>' +
+      '<span class="hit-top">' + icon(h.source === 'confluence' ? 'confluence' : 'jira') + bits + '</span>' +
+      '<span class="hit-title">' + esc(h.title) + '</span><span class="hit-text">' + esc(text) + '</span>' +
+      '<span class="hit-score">' + lvlChip(h.level) + '<b class="num">' + num(h.score) + ' % ' + t('match_word') + '</b></span></button>' +
+      (url ? '<a class="hit-out" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" aria-label="' + esc(t('open_in', { s: srcName(h.source) }) + ': ' + h.id) + '">' + icon('out') + '</a>' : '') + '</li>';
+  }
+
+  function hitsHtml(turn) {
+    var hits = turn.result.hits || [];
+    if (!hits.length) return '<div class="empty"><b>' + t('no_hits') + '</b>' + t('no_hits_hint') + '</div>';
+    var shown = turn.all ? hits : hits.slice(0, SHOWN);
+    return '<ol class="hits">' + shown.map(function (h, i) { return hitHtml(turn, h, i); }).join('') + '</ol>' +
+      (hits.length > SHOWN ? '<button type="button" class="more-btn" data-more="' + turn.id + '" aria-expanded="' + !!turn.all + '">' + icon('chevron') + '<span>' + t(turn.all ? 'show_less' : 'show_all', { n: hits.length }) + '</span></button>' : '');
+  }
+
+  function barRows(rows) {
+    return '<ul class="bars">' + rows.map(function (s) {
+      return '<li class="bar-row"><span class="bar-name">' + esc(s.name || s.id) + (s.examples && s.examples.length ? '<small>' + esc(t('like', { ids: s.examples.join(', ') })) + '</small>' : '') + '</span>' +
+        '<span class="bar-val num">' + num(s.share) + ' %</span><div class="bar"><span style="--v:' + Math.max(0, Math.min(100, +s.share || 0)) + '"></span></div></li>';
+    }).join('') + '</ul>';
+  }
+
+  function wishHtml(turn) {
+    var r = turn.result, d = r.draft, g = r.guide, out = '';
+    var open = S.insp && S.insp.turn === turn.id && S.insp.kind === 'draft';
+    var streams = r.streams && r.streams.length ? barRows(r.streams.slice(0, 4)) : '<p class="fine">' + t('stream_none') + '</p>';
+    var epics = r.epics && r.epics.length ? '<section class="sec"><div class="sec-head"><h3>' + icon('layers') + t('epic') + '</h3></div>' + barRows(r.epics.slice(0, 3)) + '</section>' : '';
+    out += '<div class="two"><section class="sec"><div class="sec-head"><h3>' + icon('route') + t('stream') + '</h3>' +
+      (r.stream_basis && r.stream_basis !== 'none' ? '<span class="fine">' + t(r.stream_basis === 'tickets' ? 'stream_tickets' : 'stream_profile') + '</span>' : '') + '</div>' + streams + '</section>' + epics + '</div>';
+    if (d) {
+      out += '<section class="sec"><div class="sec-head"><h3>' + icon('draft') + t('draft') + '</h3></div>' +
+        (d.notice ? '<div class="note">' + icon('alert') + '<p>' + esc(d.notice) + '</p></div>' : '') +
+        '<div class="artifact' + (open ? ' is-open' : '') + '" data-draft-row="' + turn.id + '"><button type="button" class="artifact-main" data-turn="' + turn.id + '" data-draft aria-expanded="' + !!open + '" aria-label="' + esc(t('draft_open') + ': ' + d.title) + '">' +
+        '<span class="artifact-ic">' + icon('draft') + '</span><span class="artifact-txt"><b>' + esc(d.title) + '</b><span>' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + ' · ' + t('chars', { n: num((d.markup || '').length) }) + '</span></span></button>' +
+        '<button type="button" class="btn" data-copy="' + turn.id + '">' + icon('copy') + '<span>' + t('copy') + '</span></button></div>' +
+        (d.open_questions && d.open_questions.length ? '<h3>' + t('questions') + '</h3><ul class="todo">' + d.open_questions.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>' : '') + '</section>';
+    }
+    if (g && g.examples && g.examples.length) {
+      out += '<section class="sec"><div class="sec-head"><h3>' + icon('book') + t('guide') + '</h3></div>' +
+        (g.sections && g.sections.length ? '<div class="chips" aria-label="' + t('guide_sections') + '">' + g.sections.map(function (s) { return '<span class="tag">' + esc(s.name || s) + '</span>'; }).join('') + '</div>' : '') +
+        '<ul class="guide">' + g.examples.map(function (e) {
+          var u = safeUrl(e.url);
+          return '<li>' + (u ? '<a class="mono" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(e.id) + '</a>' : '<span class="mono">' + esc(e.id) + '</span>') +
+            '<span>' + esc(e.title) + '</span><span class="fine num">' + t('chars', { n: num(e.chars) }) + '</span></li>';
+        }).join('') + '</ul></section>';
+    }
+    return out;
+  }
+
+  function answerHtml(turn) {
+    if (turn.state === 'run') {
+      return '<div class="think" role="status"><span class="orb" aria-hidden="true"></span><span id="step-' + turn.id + '"><span>' + t('step' + ((turn.step || 0) + 1)) + '</span></span></div>' +
+        '<div class="skel" aria-hidden="true"><i></i><i></i><i></i></div>';
+    }
+    if (!turn.result) {
+      return '<div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(turn.error || '') + '</p></div></div>' +
+        '<div><button type="button" class="btn" data-again="' + turn.id + '">' + icon('refresh') + '<span>' + t('retry') + '</span></button></div>';
+    }
+    var r = turn.result, s = r.search || {};
+    var how = s.lexical && s.vector ? 'how_both' : s.vector ? 'how_vec' : 'how_lex';
+    var meta = '<div class="meta-line"><span class="tag">' + t(how) + '</span><span class="tag">' + t(s.reranker === 'ranking' ? 'rr_ranking' : s.reranker === 'gemini' ? 'rr_gemini' : 'rr_none') + '</span>' +
+      '<span class="tag num">' + t('spots', { n: num(s.passages), s: took(s.ms) }) + '</span></div>';
+    var notes = [turn.error, s.note].filter(Boolean).map(function (n) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(n) + '</p></div>'; }).join('');
+    return proseHtml(turn) + notes + '<section class="sec"><div class="sec-head"><h3>' + t('hits') + '</h3></div><div id="hits-' + turn.id + '">' + hitsHtml(turn) + '</div>' +
+      '<details class="how"><summary>' + icon('chevron') + t('how') + '</summary>' + meta + '</details></section>' +
+      (r.modus === 'wunsch' ? wishHtml(turn) : '');
+  }
+
+  function turnHtml(turn) {
+    var f = turn.form;
+    var meta = [t(f.modus === 'wunsch' ? 'mode_wish' : 'mode_check')].concat(f.modus === 'wunsch' && f.country ? [f.country] : []).concat([f.quellen.map(srcName).join(' + ')]);
+    return '<article class="turn" id="turn-' + turn.id + '"><div class="q"><p class="q-bubble">' + esc(f.text) + '</p><p class="q-meta">' + meta.map(esc).join(' · ') + '</p></div>' +
+      '<div class="a' + (turn.state === 'run' ? '' : ' in') + '" id="a-' + turn.id + '">' + answerHtml(turn) + '</div></article>';
   }
 
   // ---------- Seite Abgleich ----------
 
-  function composer(ctx) {
-    var f = S.form, wish = f.modus === 'wunsch';
-    var modes = [['pruefen', t('mode_check')], ['wunsch', t('mode_wish')]].map(function (m) {
-      return '<label class="seg-item"><input type="radio" name="modus" value="' + m[0] + '"' + (f.modus === m[0] ? ' checked' : '') + '><span>' + m[1] + '</span></label>';
-    }).join('');
-    var src = [['jira', 'Jira', 'ticket'], ['confluence', 'Confluence', 'page']].map(function (s) {
-      return '<label class="chip"><input type="checkbox" name="quelle" value="' + s[0] + '"' + (f.quellen.indexOf(s[0]) >= 0 ? ' checked' : '') + '>' + icon(s[2]) + '<span>' + s[1] + '</span></label>';
-    }).join('');
-    var countries = (ctx.countries || []).map(function (c) { return '<option' + (c === f.country ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
-    return '<form class="composer" id="composer" novalidate>' +
-      '<fieldset class="seg"><legend class="sr-only">' + t('mode') + '</legend>' + modes + '</fieldset>' +
-      '<p class="mode-hint" id="mode-hint">' + t(wish ? 'mode_wish_hint' : 'mode_check_hint') + '</p>' +
-      '<label class="sr-only" for="text">' + t('text_label') + '</label>' +
-      '<textarea id="text" name="text" rows="' + (ctx.result ? 3 : 5) + '" maxlength="6000" placeholder="' + esc(t('placeholder')) + '" aria-describedby="mode-hint">' + esc(f.text) + '</textarea>' +
-      '<div class="composer-row"><fieldset class="chips"><legend class="sr-only">' + t('sources') + '</legend>' + src + '</fieldset>' +
-      (wish ? '<label class="country"><span>' + t('country') + '</span><select name="country">' + countries + '</select></label>' : '') +
-      '<button type="submit" class="btn"' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? '<span class="spinner" aria-hidden="true"></span>' + t('running') : icon('send') + t('run')) + '</button></div></form>';
+  function greeting() {
+    var h = new Date().getHours(), name = S.ctx && S.ctx.me && S.ctx.me.name ? String(S.ctx.me.name).split(' ')[0] : '';
+    return t(h < 11 ? 'morning' : h < 18 ? 'day' : 'evening') + (name ? ', ' + esc(name) : '');
   }
 
-  function ring(score, level) {
-    var c = 2 * Math.PI * 17, off = c * (1 - Math.max(0, Math.min(100, score)) / 100);
-    return '<div class="ring lvl-' + level + '" role="img" aria-label="' + esc(t('similarity', { n: score })) + '"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="ring-track" cx="20" cy="20" r="17"/>' +
-      '<circle class="ring-value" cx="20" cy="20" r="17" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"/></svg><b>' + score + '</b></div>';
-  }
-
-  function hitItem(h, streams) {
-    var tags = [];
-    if (h.status) tags.push('<span class="tag">' + esc(h.status) + '</span>');
-    if (h.stream) tags.push('<span class="tag tag-stream">' + esc(streams[h.stream] || h.stream) + '</span>');
-    if (h.space) tags.push('<span class="tag">' + esc(h.space) + '</span>');
-    var passages = h.passages.map(function (p) {
-      return '<p class="passage">' + (p.heading ? '<span class="path">' + esc(p.heading) + '</span>' : '') + esc(p.text || h.title) + '</p>';
-    }).join('');
-    var via = (h.by_keyword ? '<span class="via">' + icon('word') + t('by_keyword') + '</span>' : '') + (h.by_meaning ? '<span class="via">' + icon('sense') + t('by_meaning') + '</span>' : '');
-    return '<li class="hit lvl-' + h.level + '">' + ring(h.score, h.level) + '<div class="hit-body">' +
-      '<div class="hit-meta"><span class="pill lvl-' + h.level + '">' + t(h.level) + '</span><span class="src">' + icon(h.source === 'jira' ? 'ticket' : 'page') +
-      esc(h.source === 'jira' ? h.id : 'Confluence') + '</span>' + tags.join('') + '</div>' +
-      '<h3>' + link(h.url, esc(h.title) + (safeUrl(h.url) ? icon('out') : ''), 'hit-title') + '</h3>' + passages +
-      '<p class="hit-foot">' + via + (h.n_passages > h.passages.length ? '<span>' + t('more_spots', { n: h.n_passages - h.passages.length }) + '</span>' : '') + '</p></div></li>';
-  }
-
-  function verdictCard(r) {
-    var v = r.verdict, s = r.search, top = r.hits.length ? r.hits.reduce(function (a, h) { return Math.max(a, h.score); }, 0) : 0;
-    var scale = '';
-    if (s.scale) {
-      scale = '<div class="meter" aria-hidden="true"><div class="meter-track"><span class="meter-zone z-similar" style="left:' + s.scale.similar + '%;width:' + (s.scale.duplicate - s.scale.similar) + '%"></span>' +
-        '<span class="meter-zone z-duplicate" style="left:' + s.scale.duplicate + '%;width:' + (100 - s.scale.duplicate) + '%"></span>' +
-        '<span class="meter-pin lvl-' + v.level + '" style="left:' + top + '%"></span></div>' +
-        '<div class="meter-labels"><span>' + t('scale_new') + '</span><span style="left:' + s.scale.similar + '%">' + t('similar') + '</span><span style="left:' + s.scale.duplicate + '%">' + t('duplicate') + '</span></div></div>';
-    }
-    var how = t(s.lexical && s.vector ? 'how_both' : s.vector ? 'how_vec' : 'how_lex') + ', ' + t('rr_' + s.reranker) + '. ' + t('spots', { n: s.passages, s: (s.ms / 1000).toFixed(1).replace('.', S.lang === 'en' ? '.' : ',') });
-    return '<section class="card verdict lvl-' + v.level + '" aria-labelledby="h-verdict"><h2 id="h-verdict" tabindex="-1">' + t('v_' + v.level) + '</h2>' +
-      '<p class="verdict-hint">' + t('v_' + v.level + '_hint') + '</p>' +
-      (v.top ? '<p class="verdict-top">' + link(v.top.url, esc((v.top.source === 'jira' ? v.top.id + ' ' : '') + v.top.title), 'verdict-link') + '</p>' : '') + scale +
-      (r.hits.length ? '<p class="fine">' + t('counts', { d: v.duplicates, s: v.similar, r: v.related }) + '</p>' : '') +
-      '<p class="fine"><span class="fine-label">' + t('how') + ':</span> ' + how + '</p></section>';
-  }
-
-  function streamCard(r) {
-    if (r.modus !== 'wunsch' && !r.streams.length) return '';
-    var rows = r.streams.map(function (s, i) {
-      return '<li class="bar-row' + (i === 0 ? ' is-top' : '') + '"><div class="bar-head"><span class="bar-name">' + esc(s.name) + '</span><span class="bar-val">' + s.share + ' %</span></div>' +
-        '<div class="bar"><span style="width:' + Math.max(3, s.share) + '%"></span></div>' +
-        (s.examples && s.examples.length ? '<p class="fine">' + t('like') + ' ' + s.examples.map(esc).join(', ') + '</p>' : '') + '</li>';
-    }).join('');
-    var epics = r.epics.length ? '<p class="epics"><span class="fine-label">' + t('epic') + ':</span> ' + r.epics.slice(0, 3).map(function (e) {
-      return '<span class="tag">' + esc(e.id) + ' <b>' + e.share + ' %</b></span>';
-    }).join(' ') + '</p>' : '';
-    return '<section class="card" aria-labelledby="h-stream"><h2 id="h-stream">' + t('stream') + '</h2><p class="fine">' + t('stream_' + r.stream_basis) + '</p>' +
-      (rows ? '<ul class="bars">' + rows + '</ul>' : '') + epics + '</section>';
-  }
-
-  function draftCard(r) {
-    if (!r.draft) return '';
-    var d = r.draft, g = r.guide || { examples: [], sections: [] };
-    var q = d.open_questions && d.open_questions.length ? '<h3>' + t('questions') + '</h3><ul class="plain">' + d.open_questions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '';
-    var guide = '';
-    if (g.examples.length) {
-      guide = '<section class="card" aria-labelledby="h-guide"><h2 id="h-guide">' + t('guide') + '</h2><ul class="guide">' + g.examples.map(function (e) {
-        return '<li>' + link(e.url, esc(e.id + ' ' + e.title), 'guide-link') + '<p class="fine">' + (e.sections.length ? e.sections.map(esc).join(', ') : t('guide_none')) + '. ' + t('chars', { n: num(e.chars) }) + '</p></li>';
-      }).join('') + '</ul>' + (g.sections.length ? '<p class="fine"><span class="fine-label">' + t('guide_sections') + ':</span> ' + g.sections.map(function (s) { return esc(s.name); }).join(', ') + '</p>' : '') + '</section>';
-    }
-    return '<section class="card draft" aria-labelledby="h-draft"><div class="card-head"><h2 id="h-draft">' + t('draft') + '</h2>' +
-      '<button type="button" class="btn btn-quiet" data-copy>' + icon('copy') + '<span>' + t('copy') + '</span></button></div>' +
-      '<p class="fine">' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + (d.notice ? '. ' + esc(d.notice) : '') + '</p>' +
-      '<pre class="markup" id="markup" tabindex="0">' + esc(d.markup) + '</pre>' + q + '</section>' + guide;
-  }
-
-  function results(ctx) {
-    if (S.busy) {
-      return '<div class="waiting" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span id="step">' + t('step' + (S.step + 1)) + '</span></div>' +
-        '<div class="skel-list" aria-hidden="true"><span></span><span></span><span></span></div>';
-    }
-    if (ctx.error) return '<div class="banner is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(ctx.error) + '</p></div></div>';
-    var r = ctx.result;
-    if (!r) return '';
-    var names = ctx.stream_names || {};
-    var list = r.hits.length ? '<ol class="hit-list">' + r.hits.map(function (h) { return hitItem(h, names); }).join('') + '</ol>'
-      : '<div class="empty"><p class="empty-title">' + t('no_hits') + '</p><p>' + t('no_hits_hint') + '</p></div>';
-    return banner((ctx.notices || []).concat(r.search.note ? [r.search.note] : [])) +
-      '<div class="grid"><section class="hits" aria-labelledby="h-hits"><h2 id="h-hits">' + (r.hits.length === 1 ? t('hit_one') : t('hit_n', { n: r.hits.length })) + '</h2>' + list + '</section>' +
-      '<div class="side">' + verdictCard(r) + streamCard(r) + draftCard(r) + '</div></div>';
-  }
-
-  function matchPage(ctx) {
-    var has = !!(ctx.result || ctx.error || S.busy);
-    var ex = (ctx.examples || []).map(function (e, i) { return '<button type="button" class="chip-btn" data-example="' + i + '">' + esc(e.label) + '</button>'; }).join('');
-    return '<div class="page' + (has ? ' has-result' : ' is-start') + '"><header class="page-head"><h1>' + t('h_match') + '</h1><p class="lede">' + t('lede') + '</p></header>' +
-      composer(ctx) + (has ? '' : '<div class="examples"><span>' + t('try') + '</span>' + ex + '</div>') +
-      '<div id="result">' + results(ctx) + '</div></div>';
+  function matchHtml() {
+    var empty = !S.turns.length;
+    var ex = empty && S.ctx ? '<div class="suggest">' + (S.ctx.examples || []).slice(0, 3).map(function (e, i) {
+      return '<button type="button" data-example="' + i + '"><b>' + esc(e.label) + '</b><span>' + esc(e.text) + '</span></button>';
+    }).join('') + '</div>' : '';
+    var notices = S.ctx ? (S.ctx.notices || []).filter(String).map(function (n) { return '<div class="note" role="status">' + icon('alert') + '<p>' + esc(n) + '</p></div>'; }).join('') : '';
+    return '<header class="topbar">' + (empty ? '' : '<h1>' + t('match') + '</h1>') + '<span class="grow"></span></header>' +
+      '<div class="stage' + (empty ? ' is-empty' : '') + '" id="stage"><div class="scroll" id="scroll"><div class="col">' +
+      (empty ? '<div class="hero"><p class="hello">' + greeting() + '</p><h1>' + t('hero') + '</h1></div>' + notices
+        : '<div class="thread" id="thread">' + notices + S.turns.map(turnHtml).join('') + '</div>') +
+      '</div></div><div class="dock"><div class="col">' + composerHtml(empty) + ex + '</div></div></div>';
   }
 
   // ---------- Seite Daten ----------
@@ -271,18 +343,18 @@
       '<div class="strip-track"><span class="strip-band" style="left:' + pct(s.len.p10) + '%;width:' + (pct(s.len.p90) - pct(s.len.p10)).toFixed(2) + '%"></span>' +
       '<span class="strip-box" style="left:' + pct(s.len.p25) + '%;width:' + Math.max(0.6, pct(s.len.p75) - pct(s.len.p25)).toFixed(2) + '%"></span>' +
       '<span class="strip-median" style="left:' + pct(s.len.p50) + '%"></span><span class="strip-chunk" style="left:' + pct(cfg.chars) + '%"><i>' + t('chunk_mark', { n: num(cfg.chars) }) + '</i></span></div>' +
-      '<div class="strip-axis"><span>0</span><span>' + num(Math.round(max)) + '</span></div></div>';
+      '<div class="strip-axis num"><span>0</span><span>' + num(Math.round(max)) + '</span></div></div>';
   }
 
   function sourceCard(s, rep) {
     var state = (rep.chunks || []).filter(function (c) { return c.source === s.source; })[0] || { chunks: 0, embedded: 0 };
     var st = s.structure || { sample: 0, with_headings: 0, sections_per_doc: 0, section_len: { p50: 0, p75: 0, p90: 0 } };
-    var row = function (k, v) { return '<div class="kv"><dt>' + k + '</dt><dd>' + v + '</dd></div>'; };
-    return '<section class="card source" aria-labelledby="h-' + s.source + '"><div class="card-head"><h2 id="h-' + s.source + '">' + icon(s.source === 'jira' ? 'ticket' : 'page') + t(s.source) + '</h2>' +
+    var row = function (k, v) { return '<dt>' + k + '</dt><dd class="num">' + v + '</dd>'; };
+    var stat = function (n, label) { return '<div><b class="num" data-count="' + (+n || 0) + '">' + num(n) + '</b><span>' + label + '</span></div>'; };
+    return '<section class="card" aria-labelledby="h-' + s.source + '"><div class="card-head"><h3 id="h-' + s.source + '">' + icon(s.source === 'jira' ? 'jira' : 'confluence') + t(s.source + '_docs') + '</h3>' +
       '<span class="fine">' + t('sample', { n: num(st.sample) }) + '</span></div>' +
-      '<div class="tiles"><div class="tile"><b>' + num(s.docs) + '</b><span>' + t('entries') + '</span></div><div class="tile"><b>' + num(state.chunks) + '</b><span>' + t('chunks') + '</span></div>' +
-      '<div class="tile"><b>' + num(state.embedded) + '</b><span>' + t('embedded') + '</span></div></div>' +
-      '<h3>' + t('length') + '</h3>' + strip(s, rep.advice) +
+      '<div class="stats">' + stat(s.docs, t('entries')) + stat(state.chunks, t('chunks')) + stat(state.embedded, t('embedded')) + '</div>' +
+      '<div><p class="fine">' + t('length') + '</p>' + strip(s, rep.advice) + '</div>' +
       '<dl class="kvs">' + row(t('median'), num(s.len.p50)) + row(t('p90'), num(s.len.p90)) + row(t('longest'), num(s.len.max)) +
       row(t('one_chunk'), (s.single_chunk === undefined ? 100 : s.single_chunk) + ' %') + row(t('with_headings'), st.with_headings + ' %') + row(t('sec_per'), num(st.sections_per_doc)) +
       row(t('sec_len'), num(st.section_len.p50) + ' / ' + num(st.section_len.p75) + ' / ' + num(st.section_len.p90)) +
@@ -292,53 +364,145 @@
   function groupCard(title, rows) {
     if (!rows || !rows.length) return '';
     var max = rows.reduce(function (a, r) { return Math.max(a, r.n); }, 1);
-    return '<section class="card"><h2>' + title + '</h2><ul class="bars compact">' + rows.map(function (r) {
-      return '<li class="bar-row"><div class="bar-head"><span class="bar-name">' + esc(r.name) + '</span><span class="bar-val">' + num(r.n) + '</span></div><div class="bar"><span style="width:' + Math.max(2, 100 * r.n / max).toFixed(1) + '%"></span></div></li>';
+    return '<section class="card"><h3>' + title + '</h3><ul class="bars">' + rows.slice(0, 8).map(function (r) {
+      return '<li class="bar-row"><span class="bar-name">' + esc((S.data.ctx && S.data.ctx.stream_names && S.data.ctx.stream_names[r.name]) || r.name) + '</span><span class="bar-val num">' + num(r.n) + '</span>' +
+        '<div class="bar"><span style="--v:' + Math.max(2, 100 * r.n / max).toFixed(1) + '"></span></div></li>';
     }).join('') + '</ul></section>';
   }
 
-  function dataPage(ctx) {
-    var rep = ctx.report;
-    var head = '<header class="page-head row"><div><h1>' + t('h_data') + '</h1><p class="lede">' + t('data_lede') + '</p></div>' +
-      '<button type="button" class="btn btn-quiet" data-recalc' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? '<span class="spinner" aria-hidden="true"></span>' : icon('refresh')) + '<span>' + t('recalc') + '</span></button></header>';
-    var err = ctx.error ? '<div class="banner is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(ctx.error) + '</p></div></div>' : '';
-    if (!rep || !rep.sources.some(function (s) { return s.docs > 0; })) {
-      return '<div class="page">' + head + err + banner(ctx.notices) + '<div class="empty"><p class="empty-title">' + t('no_data') + '</p><p>' + t(ctx.store === 'bigquery' ? 'sync_none' : 'no_data_hint') + '</p></div></div>';
+  function dataHtml() {
+    var d = S.data, ctx = d.ctx, rep = ctx && ctx.report;
+    var top = '<header class="topbar"><h1>' + t('data') + '</h1><span class="grow"></span>' + (rep ? '<span class="tag">' + t('store_' + (rep.mode === 'bigquery' ? 'bigquery' : 'memory')) + '</span>' : '') + '</header>';
+    var head = '<div class="data-head"><div><h2>' + t('h_data') + '</h2><p>' + t('data_lede') + '</p></div>' +
+      '<button type="button" class="btn" data-recalc' + (d.busy ? ' disabled' : '') + '>' + (d.busy ? '<span class="spinner" aria-hidden="true"></span>' : icon('refresh')) + '<span>' + t('recalc') + '</span></button></div>';
+    var err = d.error || (ctx && ctx.error);
+    var body = err ? '<div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(err) + '</p></div></div>' : '';
+    if (!ctx && !err) body += '<div class="think" role="status"><span class="orb" aria-hidden="true"></span><span>' + t('loading') + '</span></div><div class="skel" aria-hidden="true"><i></i><i></i><i></i></div>';
+    else if (!rep || !rep.sources.some(function (s) { return s.docs > 0; })) {
+      if (!err) body += '<div class="empty"><b>' + t('no_data') + '</b>' + t(ctx && ctx.store === 'bigquery' ? 'sync_none' : 'no_data_hint') + '</div>';
+    } else {
+      var a = rep.advice;
+      body += '<section class="advice" aria-labelledby="h-advice"><h3 id="h-advice">' + t('advice') + '</h3>' +
+        '<p class="advice-val"><b class="num" data-count="' + (+a.chars || 0) + '">' + num(a.chars) + '</b><span>' + t('chars_unit') + ', ' + t('overlap', { n: num(a.overlap) }) + '</span></p>' +
+        '<div><p class="state' + (a.differs ? ' warn' : '') + '">' + icon(a.differs ? 'alert' : 'check') + (a.differs ? t('advice_change', { c: num(rep.config.chars), o: num(rep.config.overlap) }) : t('advice_ok')) + '</p>' +
+        '<ul>' + (a.lines || []).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' +
+        '<p class="fine">' + (a.differs ? t('advice_how', { c: a.chars, o: a.overlap }) + ' ' : '') + t('est', { n: num(a.est_chunks), r: num(a.est_runs) }) + '</p></div></section>' +
+        '<div class="src-grid">' + rep.sources.filter(function (s) { return s.docs > 0; }).map(function (s) { return sourceCard(s, rep); }).join('') + '</div>' +
+        '<div class="groups">' + groupCard(t('g_stream'), rep.groups.stream) + groupCard(t('g_status'), rep.groups.status) + groupCard(t('g_space'), rep.groups.space) +
+        (ctx.store === 'bigquery' ? '<section class="card"><h3>' + t('sync') + '</h3>' + (ctx.sync && ctx.sync.length ? '<ul class="sync">' + ctx.sync.map(function (x) {
+          return '<li><span class="dot ' + (x.ok ? 'ok' : 'bad') + '" aria-hidden="true"></span><div><span class="sr-only">' + t(x.ok ? 'sync_ok' : 'sync_bad') + ': </span><b>' + srcName(x.source) + '</b> <span class="fine">' + esc(x.at) + '</span><p class="fine">' + esc(x.note) + '</p></div></li>';
+        }).join('') + '</ul>' : '<p class="fine">' + t('sync_none') + '</p>') + '</section>' : '') + '</div>';
     }
-    var a = rep.advice;
-    var advice = '<section class="card advice" aria-labelledby="h-advice"><h2 id="h-advice">' + t('advice') + '</h2>' +
-      '<p class="advice-value"><b>' + num(a.chars) + '</b> ' + t('chars_unit') + '<span class="advice-plus">' + num(a.overlap) + ' ' + t('overlap') + '</span></p>' +
-      '<p class="advice-state">' + (a.differs ? t('advice_change', { c: num(rep.config.chars), o: num(rep.config.overlap) }) : icon('check') + t('advice_ok')) + '</p>' +
-      (a.differs ? '<p class="fine">' + t('advice_how', { c: a.chars, o: a.overlap }) + '</p>' : '') +
-      '<ul class="plain">' + a.lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' +
-      '<p class="fine">' + t('est', { n: num(a.est_chunks), r: num(a.est_runs) }) + '</p></section>';
-    var sync = ctx.store === 'bigquery' ? '<section class="card"><h2>' + t('sync') + '</h2>' + (ctx.sync && ctx.sync.length ? '<ul class="sync">' + ctx.sync.map(function (x) {
-      return '<li><span class="dot ' + (x.ok ? 'ok' : 'bad') + '" aria-hidden="true"></span><div><b>' + esc(x.source === 'jira' ? 'Jira' : 'Confluence') + '</b> <span class="fine">' + esc(x.at) + '</span><p class="fine">' + esc(x.note) + '</p></div></li>';
-    }).join('') + '</ul>' : '<p class="fine">' + t('sync_none') + '</p>') + '</section>' : '';
-    return '<div class="page">' + head + err + banner(ctx.notices) + '<p class="fine store">' + t('store_' + rep.mode) + '</p>' +
-      '<div class="data-grid"><div class="data-main">' + advice + rep.sources.filter(function (s) { return s.docs > 0; }).map(function (s) { return sourceCard(s, rep); }).join('') + '</div>' +
-      '<div class="side">' + sync + groupCard(t('g_stream'), rep.groups.stream) + groupCard(t('g_status'), rep.groups.status) + groupCard(t('g_space'), rep.groups.space) + '</div></div></div>';
+    return top + '<div class="stage"><div class="scroll" id="scroll"><div class="col"><div class="data" id="data">' + head + body + '</div></div></div></div>';
   }
 
-  // ---------- Zeichnen und Bedienen ----------
+  /** Jira-Schreibweise lesbar zeigen (Überschriften, fett, Listen). Kopiert wird weiterhin der Jira-Text. */
+  function jiraHtml(markup) {
+    var out = [], list = false;
+    String(markup || '').split('\n').forEach(function (line) {
+      var m = /^h([1-6])\.\s*(.*)$/.exec(line), li = /^[*-]\s+(.*)$/.exec(line);
+      var txt = function (v) { return esc(v).replace(/\*([^*\n]+)\*/g, '<b>$1</b>'); };
+      if (li) { if (!list) { out.push('<ul>'); list = true; } out.push('<li>' + txt(li[1]) + '</li>'); return; }
+      if (list) { out.push('</ul>'); list = false; }
+      if (m) out.push((+m[1] <= 2 ? '<h3>' : '<h4>') + txt(m[2]) + (+m[1] <= 2 ? '</h3>' : '</h4>'));
+      else out.push('<p>' + txt(line) + '</p>');
+    });
+    if (list) out.push('</ul>');
+    return out.join('');
+  }
+
+  // ---------- Detailbereich ----------
+
+  function inspHtml() {
+    var turn = S.insp && turnById(S.insp.turn);
+    if (!turn || !turn.result) return '';
+    var close = '<button type="button" class="icon-btn" data-insp-close aria-label="' + t('close') + '">' + icon('x') + '</button>';
+    if (S.insp.kind === 'draft') {
+      var d = turn.result.draft;
+      return '<div class="insp-head">' + icon('draft') + '<span class="fine">' + t('draft') + '</span><span class="grow"></span>' + close + '</div>' +
+        '<div class="insp-body"><h2 id="insp-title" tabindex="-1">' + esc(d.title) + '</h2>' +
+        '<div class="meta-line"><span class="tag">' + t(d.source === 'gemini' ? 'draft_ai' : 'draft_rule') + '</span>' + (d.country ? '<span class="tag">' + esc(d.country) + '</span>' : '') + '</div>' +
+        '<div class="rich">' + jiraHtml(d.markup) + '</div></div>' +
+        '<div class="insp-foot"><button type="button" class="btn btn-primary" data-copy="' + turn.id + '">' + icon('copy') + '<span>' + t('copy') + '</span></button></div>';
+    }
+    var h = turn.result.hits[S.insp.i];
+    if (!h) return '';
+    var url = safeUrl(h.url), names = (S.ctx && S.ctx.stream_names) || {};
+    var kv = function (k, v) { return v ? '<dt>' + k + '</dt><dd>' + v + '</dd>' : ''; };
+    var lvl = h.level === 'duplicate' || h.level === 'similar' || h.level === 'related' ? h.level : 'new';
+    return '<div class="insp-head">' + icon(h.source === 'confluence' ? 'confluence' : 'jira') + '<span class="mono">' + esc(h.id) + '</span>' + lvlChip(h.level) + '<span class="grow"></span>' + close + '</div>' +
+      '<div class="insp-body in"><h2 id="insp-title" tabindex="-1">' + esc(h.title) + '</h2>' +
+      '<div class="meter lvl-' + lvl + '" style="background:none"><b class="num">' + num(h.score) + ' %</b><div class="bar"><span style="--v:' + Math.max(0, Math.min(100, +h.score || 0)) + '"></span></div></div>' +
+      '<dl class="kvs">' + kv(t('status'), esc(calm(h.status))) + kv('Stream', esc(names[h.stream] || h.stream)) + kv(t('epic'), h.epic ? '<span class="mono">' + esc(h.epic) + '</span>' : '') +
+      kv(t('space'), esc(h.space)) + kv(t('updated'), h.updated ? esc(new Date(h.updated).toLocaleDateString(S.lang === 'en' ? 'en-GB' : 'de-DE')) : '') +
+      kv(t('found_by'), [h.by_keyword ? t('by_keyword') : '', h.by_meaning ? t('by_meaning') : ''].filter(Boolean).join(' + ')) + '</dl>' +
+      '<div><h3>' + t('passages') + '</h3>' + (h.passages || []).map(function (p) { return '<p class="passage">' + (p.heading ? '<b>' + esc(p.heading) + '</b>' : '') + esc(p.text) + '</p>'; }).join('') +
+      (h.n_passages > (h.passages || []).length ? '<p class="fine" style="margin-top:8px">' + t('more_spots', { n: h.n_passages - h.passages.length }) + '</p>' : '') + '</div></div>' +
+      (url ? '<div class="insp-foot"><a class="btn btn-primary" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + icon('out') + '<span>' + t('open_in', { s: srcName(h.source) }) + '</span></a></div>' : '');
+  }
+
+  // ---------- Zeichnen ----------
 
   var app = document.getElementById('app');
 
-  function draw(keepFocus) {
-    var active = keepFocus && document.activeElement && document.activeElement.id;
-    var main;
-    if (S.fatal) main = '<div class="page"><h1>' + t('failed') + '</h1><div class="banner is-error" role="alert">' + icon('alert') + '<div><p>' + esc(S.fatal) + '</p></div></div><p><button type="button" class="btn" data-retry>' + t('retry') + '</button></p></div>';
-    else if (!S.ctx) main = '<div class="page"><h1 class="sr-only">' + esc(window.APP_NAME || '') + '</h1><div class="waiting" role="status"><span class="spinner" aria-hidden="true"></span>' + t('loading') + '</div></div>';
-    else main = S.path === '/daten' ? dataPage(S.ctx) : matchPage(S.ctx);
-    app.innerHTML = shell(main);
-    document.documentElement.lang = S.lang;
-    document.title = (S.path === '/daten' ? t('data') : t('match')) + ' · ' + (window.APP_NAME || '');
-    if (active) { var el = document.getElementById(active); if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); } }
+  function mainHtml() {
+    if (S.fatal) {
+      return '<header class="topbar"><h1>' + esc(window.APP_NAME || '') + '</h1></header><div class="stage"><div class="col"><div class="note is-error" role="alert">' + icon('alert') + '<div><p><b>' + t('failed') + '</b></p><p>' + esc(S.fatal) + '</p></div></div>' +
+        '<p style="margin-top:14px"><button type="button" class="btn" data-reload>' + icon('refresh') + '<span>' + t('retry') + '</span></button></p></div></div>';
+    }
+    return S.path === '/daten' ? dataHtml() : matchHtml();
   }
 
+  function pills(instant) {
+    var o = instant ? { instant: true } : undefined;
+    if ($('nav')) M.pill($('nav'), o);
+    if ($('lang')) M.pill($('lang'), o);
+    if ($('mode')) M.pill($('mode'), instant ? { instant: true, active: 'label:has(input:checked)' } : { active: 'label:has(input:checked)' });
+  }
+
+  function afterMain() {
+    document.documentElement.lang = S.lang;
+    document.title = (S.path === '/daten' ? t('data') : t('match')) + ' · ' + (window.APP_NAME || '');
+    var d = $('data');
+    if (d) raf(function () { d.classList.add('in'); });
+    pills(true);
+  }
+
+  function drawAll() {
+    var insp = inspHtml();
+    app.innerHTML = '<a class="skip" href="#main">' + t('skip') + '</a><div class="app" id="shell" data-side="' + S.side + '" data-insp="' + (insp ? 1 : 0) + '">' +
+      '<aside class="side" id="side">' + sideHtml() + '</aside><main class="main" id="main" tabindex="-1">' + mainHtml() + '</main>' +
+      '<button type="button" class="scrim" data-insp-close tabindex="-1" aria-label="' + t('close') + '"></button><aside class="insp" id="insp" aria-labelledby="insp-title"' + (insp ? '' : ' hidden') + '>' + insp + '</aside></div><div class="live" id="live" role="status" aria-live="polite"></div><div class="sr-only" id="say" role="status" aria-live="polite"></div>';
+    afterMain();
+  }
+
+  function drawMain() { var m = $('main'); if (!m) { drawAll(); return; } m.innerHTML = mainHtml(); afterMain(); }
+  function drawSide() { var s = $('side'); if (s) { s.innerHTML = sideHtml(); pills(true); } }
+  function drawHist() { var h = $('hist'); if (h) h.innerHTML = histHtml(); }
+  function drawInsp() {
+    var p = $('insp'), sh = $('shell'), html = inspHtml();
+    if (!p || !sh) return;
+    p.innerHTML = html; p.hidden = !html; sh.dataset.insp = html ? '1' : '0';
+    modal();
+    Array.prototype.forEach.call(document.querySelectorAll('.hit.is-open, .artifact.is-open'), function (el) {
+      el.classList.remove('is-open'); var b = el.querySelector('[aria-expanded]'); if (b) b.setAttribute('aria-expanded', 'false');
+    });
+    var row = S.insp ? document.querySelector(S.insp.kind === 'draft' ? '[data-draft-row="' + S.insp.turn + '"]' : '[data-hit-row="' + S.insp.turn + '-' + S.insp.i + '"]') : null;
+    if (row) { row.classList.add('is-open'); var b = row.querySelector('[aria-expanded]'); if (b) b.setAttribute('aria-expanded', 'true'); }
+  }
+  /** Unter 1180 px liegt der Detailbereich über der Seite: dann ist er ein Dialog und der Rest nicht bedienbar. */
+  function modal() {
+    var p = $('insp'), on = !!(p && !p.hidden && window.matchMedia && window.matchMedia('(max-width: 1180px)').matches);
+    ['side', 'main'].forEach(function (id) { var el = $(id); if (el) el.inert = on; });
+    if (!p) return;
+    if (on) { p.setAttribute('role', 'dialog'); p.setAttribute('aria-modal', 'true'); } else { p.removeAttribute('role'); p.removeAttribute('aria-modal'); }
+  }
+  function scrollEnd() { var s = $('scroll'); if (s) s.scrollTop = s.scrollHeight; }
+  function scrollToTurn(turn) { var el = $('turn-' + turn.id), s = $('scroll'); if (el && s) s.scrollTop = Math.max(0, el.offsetTop - 12); }
+
   function readForm() {
-    var f = document.getElementById('composer');
-    if (!f) return;
+    var f = $('composer');
+    if (!f || typeof FormData !== 'function') return;
     var data = new FormData(f);
     S.form.text = String(data.get('text') || '');
     S.form.modus = data.get('modus') === 'wunsch' ? 'wunsch' : 'pruefen';
@@ -346,50 +510,139 @@
     if (data.get('country')) S.form.country = String(data.get('country'));
   }
 
-  function load(path, params) {
-    S.path = path === '/daten' ? '/daten' : '/abgleich';
-    S.fatal = '';
-    var first = window.BOOT && window.BOOT.path === S.path && !params ? window.BOOT.promise.then(function (text) { var d = JSON.parse(text); if (d.fatal) throw new Error(d.fatal); return d; }) : api('GET', S.path, params);
-    window.BOOT = null;
-    if (!S.ctx || S.ctx.active !== (S.path === '/daten' ? 'daten' : 'abgleich')) { S.ctx = null; draw(); }
-    return first.then(function (d) {
-      S.ctx = d.ctx; S.busy = false;
-      if (S.path === '/abgleich' && !S.form.country) S.form.country = d.ctx.form.country;
-      draw();
-    }).catch(function (e) { S.busy = false; S.fatal = e && e.message ? e.message : String(e); draw(); });
+  function hint(text, isError) {
+    var h = $('hint');
+    if (!h) return;
+    h.textContent = text; h.className = isError ? 'err' : '';
+    var ta = $('text'); if (ta) { if (isError) ta.setAttribute('aria-invalid', 'true'); else ta.removeAttribute('aria-invalid'); }
   }
 
-  var stepTimer = null;
-  function run() {
+  function setBusy(on) {
+    S.busy = on;
+    var b = $('send');
+    if (!b) return;
+    b.disabled = on; b.setAttribute('aria-label', t(on ? 'running' : 'run'));
+    M.swap(b, on ? '<span class="spinner" aria-hidden="true"></span>' : icon('send'));
+  }
+
+  function say(text) { var el = $('say'); if (el) el.textContent = text; }
+
+  function toast(text) {
+    var l = $('live');
+    if (!l) return;
+    l.innerHTML = '<span class="toast">' + icon('check') + '<span>' + esc(text) + '</span></span>';
+    var el = l.firstChild;
+    M.enter(el, { y: 16 });
+    setTimeout(function () { if (el.parentNode === l) M.exit(el).then(function () { if (el.parentNode === l) l.removeChild(el); }); }, 2200);
+  }
+
+  // ---------- Ablauf ----------
+
+  function revealAnswer(turn) {
+    var a = $('a-' + turn.id);
+    if (!a) return;
+    M.exit(a).then(function () {
+      a.innerHTML = answerHtml(turn);
+      M.enter(a.children, { stagger: 90 });
+      Array.prototype.forEach.call(a.querySelectorAll('.prose'), function (p, i) { setTimeout(function () { M.words(p); }, i * 320); });
+      Array.prototype.forEach.call(a.querySelectorAll('[data-count]'), function (el) { M.count(el, +el.getAttribute('data-count'), { format: function (n) { return num(Math.round(n)) + ' %'; } }); });
+      raf(function () { a.classList.add('in'); });
+      scrollToTurn(turn);
+      var h = $('h-verdict-' + turn.id) || a.querySelector('[role=alert]');
+      if (h && h.focus && document.activeElement && document.activeElement.id !== 'text') h.focus({ preventScroll: true });
+    });
+  }
+
+  function runTurn(turn) {
+    turn.state = 'run'; turn.step = 0; turn.result = null; turn.error = '';
+    setBusy(true);
+    say(t('running'));
+    var timer = setInterval(function () {
+      if (turn.step >= 2) return;
+      turn.step += 1;
+      var el = $('step-' + turn.id);
+      if (el) M.swap(el, '<span>' + t('step' + (turn.step + 1)) + '</span>');
+    }, 1700);
+    var f = turn.form;
+    api('POST', '/abgleich', { text: [f.text], modus: [f.modus], country: [f.country], quelle: f.quellen }).then(function (d) {
+      turn.result = d.ctx.result || null; turn.error = d.ctx.error || '';
+      if (turn.result) remember(f, turn.result.verdict.level === 'duplicate' || turn.result.verdict.level === 'similar' ? turn.result.verdict.level : 'new', turn.result);
+    }).catch(function (e) { turn.error = msg(e); }).then(function () {
+      clearInterval(timer);
+      turn.state = turn.result ? 'done' : 'error';
+      setBusy(false);
+      drawHist();
+      var lv = turn.result ? turn.result.verdict.level : '';
+      say(turn.result ? t('v_' + (lv === 'duplicate' || lv === 'similar' ? lv : 'new')) : t('failed') + ': ' + turn.error);
+      revealAnswer(turn);
+    });
+  }
+
+  function submit() {
     if (S.busy) return;
     readForm();
-    if (!S.form.quellen.length) S.form.quellen = ['jira', 'confluence'];
-    S.busy = true; S.step = 0;
-    if (S.ctx) { S.ctx.result = null; S.ctx.error = null; }
-    draw();
-    stepTimer = setInterval(function () {
-      S.step = Math.min(2, S.step + 1);
-      var el = document.getElementById('step');
-      if (el) el.textContent = t('step' + (S.step + 1));
-    }, 1800);
-    api('POST', '/abgleich', { text: [S.form.text], modus: [S.form.modus], country: [S.form.country], quelle: S.form.quellen }).then(function (d) {
-      S.ctx = d.ctx;
-      if (d.ctx.result) remember(S.form, d.ctx.result.verdict.level);
-    }).catch(function (e) {
-      if (S.ctx) S.ctx.error = e && e.message ? e.message : String(e); else S.fatal = String(e && e.message || e);
-    }).then(function () {
-      clearInterval(stepTimer);
-      S.busy = false;
-      draw();
-      var h = document.getElementById('h-verdict') || document.querySelector('#result [role=alert]');
-      if (h) { if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: false }); }
+    var text = S.form.text.trim();
+    if (text.length < 12) { hint(t('too_short'), true); var ta = $('text'); if (ta) ta.focus(); return; }
+    if (!S.form.quellen.length) { hint(t('no_source'), true); return; }
+    var turn = { id: ++S.seq, form: { text: text, modus: S.form.modus, country: S.form.country, quellen: S.form.quellen.slice() }, state: 'run', step: 0, all: false };
+    var first = !S.turns.length || !$('thread');
+    S.form.text = '';
+    S.busy = true;
+    if (first) {
+      M.morph(function () { S.turns.push(turn); drawMain(); }, { type: 'dock' }).then(function () { var ta = $('text'); if (ta) ta.focus(); });
+    } else {
+      S.turns.push(turn);
+      $('thread').insertAdjacentHTML('beforeend', turnHtml(turn));
+      var ta = $('text'); if (ta) ta.value = '';
+      hint(t(S.form.modus === 'wunsch' ? 'hint_wish' : 'hint_check'));
+      var el = $('turn-' + turn.id);
+      M.enter(el.children, { stagger: 80 });
+      scrollEnd();
+    }
+    runTurn(turn);
+  }
+
+  function fresh() {
+    if (S.busy) return;
+    var go = function () { S.turns = []; S.insp = null; S.form.text = ''; S.path = '/abgleich'; drawAll(); };
+    if (location.hash.replace(/^#/, '') === '/daten') { S.turns = []; S.insp = null; location.hash = '#/abgleich'; return; }
+    M.morph(go, { type: 'dock' }).then(function () { var ta = $('text'); if (ta) ta.focus(); });
+  }
+
+  function openInsp(turnId, kind, i, origin) {
+    var same = S.insp && S.insp.turn === turnId && S.insp.kind === kind && S.insp.i === i;
+    if (same) { closeInsp(); return; }
+    var row = !S.insp && origin && origin.closest('.hit, .artifact');
+    if (row) row.style.viewTransitionName = 'inspect';
+    M.morph(function () {
+      if (row) row.style.viewTransitionName = '';
+      S.insp = { turn: turnId, kind: kind, i: i };
+      drawInsp();
+      var p = $('insp'); if (p && row) p.style.viewTransitionName = 'inspect';
+    }, { type: 'inspect' }).then(function () {
+      var p = $('insp'); if (p) p.style.viewTransitionName = '';
+      var h = $('insp-title'); if (h) h.focus({ preventScroll: true });
+      raf(function () { var b = document.querySelector('#insp .insp-body'); if (b) b.classList.add('in'); });
+    });
+  }
+
+  /** quick: von der Tastatur ausgelöst, dann ohne Übergang. */
+  function closeInsp(quick) {
+    if (!S.insp) return;
+    var was = S.insp;
+    var shut = function () { S.insp = null; drawInsp(); };
+    (quick ? Promise.resolve(shut()) : M.morph(shut, { type: 'close' })).then(function () {
+      var back = document.querySelector(was.kind === 'draft' ? '[data-draft-row="' + was.turn + '"] [data-draft]' : '[data-hit-row="' + was.turn + '-' + was.i + '"] .hit-main');
+      if (back) back.focus({ preventScroll: true });
     });
   }
 
   function copyText(text, btn) {
     var done = function () {
-      var label = btn.querySelector('span');
-      if (label) { label.textContent = t('copied'); setTimeout(function () { if (label.isConnected) label.textContent = t('copy'); }, 1800); }
+      toast(t('copied_toast'));
+      if (!btn) return;
+      M.swap(btn, icon('check') + '<span>' + t('copied') + '</span>');
+      setTimeout(function () { if (btn.isConnected) M.swap(btn, icon('copy') + '<span>' + t('copy') + '</span>'); }, 1800);
     };
     var fallback = function () {
       var ta = document.createElement('textarea');
@@ -397,47 +650,152 @@
       document.body.appendChild(ta); ta.select();
       try { document.execCommand('copy'); done(); } catch (e) { /* dann von Hand markieren */ }
       document.body.removeChild(ta);
+      if (btn && btn.focus) btn.focus({ preventScroll: true });
     };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
   }
 
-  app.addEventListener('submit', function (e) { if (e.target.id === 'composer') { e.preventDefault(); run(); } });
+  function loadData(fresh) {
+    S.data.busy = true; S.data.error = '';
+    if (S.path === '/daten') drawMain();
+    var boot = !fresh && window.BOOT && window.BOOT.path === '/daten' ? window.BOOT.promise.then(function (text) { var d = JSON.parse(text); if (d.fatal) throw new Error(d.fatal); return d; }) : api('GET', '/daten', fresh ? { neu: ['1'] } : {});
+    window.BOOT = null;
+    return boot.then(function (d) { S.data.ctx = d.ctx; }).catch(function (e) { S.data.error = msg(e); }).then(function () {
+      S.data.busy = false;
+      if (S.path !== '/daten') return;
+      drawMain();
+      if (fresh) { var rb = document.querySelector('[data-recalc]'); if (rb) rb.focus({ preventScroll: true }); }
+      var el = $('data');
+      if (el) {
+        M.enter(el.children, { stagger: 70 });
+        Array.prototype.forEach.call(el.querySelectorAll('[data-count]'), function (n) { M.count(n, +n.getAttribute('data-count'), { format: function (v) { return num(Math.round(v)); } }); });
+      }
+    });
+  }
+
+  function go(path) {
+    readForm();
+    S.path = path === '/daten' ? '/daten' : '/abgleich';
+    S.insp = null;
+    drawAll();
+    if (S.path === '/daten') { if (!S.data.ctx || S.data.error) loadData(false); }
+    else if (!S.ctx) boot();
+    var m = $('main'); if (m && m.firstChild) { M.enter(m.querySelector('.col'), { y: 8 }); m.focus({ preventScroll: true }); }
+  }
+
+  function boot() {
+    var first = window.BOOT && window.BOOT.path === '/abgleich' ? window.BOOT.promise.then(function (text) { var d = JSON.parse(text); if (d.fatal) throw new Error(d.fatal); return d; }) : api('GET', '/abgleich', {});
+    window.BOOT = null;
+    return first.then(function (d) {
+      S.ctx = d.ctx; S.fatal = '';
+      if (!S.form.country) S.form.country = d.ctx.form.country;
+      if ((d.ctx.result || d.ctx.error) && d.ctx.form && d.ctx.form.text && !S.turns.length) {
+        S.turns.push({ id: ++S.seq, form: d.ctx.form, state: d.ctx.result ? 'done' : 'error', result: d.ctx.result, error: d.ctx.error || '', all: false });
+      }
+      drawAll();
+      var hero = document.querySelector('.stage.is-empty .col');
+      if (hero) M.enter([hero.querySelector('.hero')].concat(Array.prototype.slice.call(document.querySelectorAll('.dock .col > *'))), { stagger: 90 });
+    }).catch(function (e) { S.fatal = msg(e); drawAll(); });
+  }
+
+  // ---------- Bedienen ----------
+
+  app.addEventListener('submit', function (e) { if (e.target.id === 'composer') { e.preventDefault(); submit(); } });
   app.addEventListener('keydown', function (e) {
-    if (e.target.id === 'text' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+    if (e.target.id === 'text' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); return; }
   });
+  if (document.addEventListener) document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && S.insp) { e.preventDefault(); closeInsp(true); } });
+  app.addEventListener('input', function (e) { if (e.target.id === 'text') { var h = $('hint'); if (h && h.className === 'err') hint(t(S.form.modus === 'wunsch' ? 'hint_wish' : 'hint_check')); } });
   app.addEventListener('change', function (e) {
-    if (e.target.name === 'modus') { readForm(); draw(); var r = document.querySelector('input[name=modus]:checked'); if (r) r.focus(); }
+    if (e.target.name !== 'modus' && e.target.name !== 'quelle' && e.target.name !== 'country') return;
+    readForm();
+    if (e.target.name !== 'modus') { hint(t(S.form.modus === 'wunsch' ? 'hint_wish' : 'hint_check')); return; }
+    var wish = S.form.modus === 'wunsch', box = $('country-box');
+    hint(t(wish ? 'hint_wish' : 'hint_check'));
+    if (box && S.ctx && (S.ctx.countries || []).length) { var was = box.hidden; box.hidden = !wish; if (was && wish) M.enter(box, { y: 0 }); }
+    pills();
   });
+  app.addEventListener('mouseover', function (e) { light(e, true); });
+  app.addEventListener('mouseout', function (e) { light(e, false); });
+  function light(e, on) {
+    var c = e.target.closest && e.target.closest('.cite');
+    if (!c) return;
+    var row = document.querySelector('[data-hit-row="' + c.getAttribute('data-turn') + '-' + c.getAttribute('data-hit') + '"]');
+    if (row) row.classList.toggle('is-lit', on);
+  }
+
   app.addEventListener('click', function (e) {
     var el = e.target.closest('button, a');
     if (!el) return;
-    if (el.hasAttribute('data-lang')) { readForm(); S.lang = el.getAttribute('data-lang') === 'en' ? 'en' : 'de'; store.set('lang', S.lang); draw(); return; }
+    if (el.classList.contains('skip')) { e.preventDefault(); var mm = $('main'); if (mm) mm.focus(); return; }
+    if (el.hasAttribute('data-lang')) { readForm(); S.lang = el.getAttribute('data-lang') === 'en' ? 'en' : 'de'; store.set('lang', S.lang); drawAll(); var l = document.querySelector('[data-lang="' + S.lang + '"]'); if (l) l.focus(); return; }
     if (el.hasAttribute('data-theme-toggle')) {
-      readForm();
       var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next; store.set('theme', next); draw();
-      var b = document.querySelector('[data-theme-toggle]'); if (b) b.focus();
+      M.morph(function () { document.documentElement.dataset.theme = next; }, { type: 'theme' });
+      store.set('theme', next);
+      el.setAttribute('aria-label', t(next === 'dark' ? 'theme_light' : 'theme_dark'));
+      M.swap(el, icon(next === 'dark' ? 'sun' : 'moon'));
       return;
     }
-    if (el.hasAttribute('data-example') && S.ctx) { var ex = S.ctx.examples[+el.getAttribute('data-example')]; if (ex) { S.form.text = ex.text; draw(); run(); } return; }
-    if (el.hasAttribute('data-recent')) {
-      var r = recent()[+el.getAttribute('data-recent')];
-      if (!r) return;
-      S.form.text = r.text; S.form.modus = r.modus === 'wunsch' ? 'wunsch' : 'pruefen';
-      if (S.path !== '/abgleich') { location.hash = '#/abgleich'; }
-      else { draw(); run(); }
+    if (el.hasAttribute('data-side-toggle')) {
+      S.side = S.side === 'open' ? 'closed' : 'open'; store.set('side', S.side);
+      M.morph(function () { $('shell').dataset.side = S.side; drawSide(); }, { type: 'side' }).then(function () { var b = document.querySelector('[data-side-toggle]'); if (b) b.focus(); });
       return;
     }
-    if (el.hasAttribute('data-copy')) { var m = document.getElementById('markup'); if (m) copyText(m.textContent, el); return; }
-    if (el.hasAttribute('data-recalc')) { S.busy = true; draw(); load('/daten', { neu: ['1'] }); return; }
-    if (el.hasAttribute('data-retry')) { load(S.path); }
-  });
-  window.addEventListener('hashchange', function () {
-    var p = location.hash.replace(/^#/, '');
-    readForm();
-    load(p === '/daten' ? '/daten' : '/abgleich');
+    if (el.hasAttribute('data-new')) { fresh(); return; }
+    if (el.hasAttribute('data-example') && S.ctx) { var ex = S.ctx.examples[+el.getAttribute('data-example')]; if (ex) { var ta = $('text'); if (ta) ta.value = ex.text; submit(); } return; }
+    if (el.hasAttribute('data-hist')) {
+      var r = history()[+el.getAttribute('data-hist')];
+      if (!r || S.busy) return;
+      S.form = { text: r.text, modus: r.modus === 'wunsch' ? 'wunsch' : 'pruefen', country: r.country || S.form.country, quellen: Array.isArray(r.quellen) && r.quellen.length ? r.quellen : ['jira', 'confluence'] };
+      S.turns = []; S.insp = null; S.path = '/abgleich';
+      if (r.result && r.result.verdict) {
+        var f = S.form;
+        S.turns = [{ id: ++S.seq, form: { text: f.text, modus: f.modus, country: f.country, quellen: f.quellen.slice() }, state: 'done', result: r.result, error: '', all: false }];
+        S.form.text = '';
+        if (location.hash.replace(/^#/, '') === '/daten') { location.hash = '#/abgleich'; return; }
+        M.morph(function () { drawAll(); }, { type: 'dock' }).then(function () { var h = $('h-verdict-' + S.seq); if (h) h.focus({ preventScroll: true }); });
+        return;
+      }
+      if (location.hash.replace(/^#/, '') === '/daten') { S.pending = true; location.hash = '#/abgleich'; return; }
+      drawAll(); submit();
+      return;
+    }
+    if (el.hasAttribute('data-hit')) { openInsp(+el.getAttribute('data-turn'), 'hit', +el.getAttribute('data-hit'), el.classList.contains('cite') ? document.querySelector('[data-hit-row="' + el.getAttribute('data-turn') + '-' + el.getAttribute('data-hit') + '"] .hit-main') : el); return; }
+    if (el.hasAttribute('data-draft')) { openInsp(+el.getAttribute('data-turn'), 'draft', 0, el); return; }
+    if (el.hasAttribute('data-insp-close')) { closeInsp(); return; }
+    if (el.hasAttribute('data-as-wish')) {
+      var tw = turnById(el.getAttribute('data-as-wish'));
+      if (!tw || S.busy) return;
+      S.form.modus = 'wunsch';
+      var box = $('text'); if (box) box.value = tw.form.text;
+      var radio = document.querySelector('input[name=modus][value=wunsch]'); if (radio) radio.checked = true;
+      var cb = $('country-box'); if (cb && S.ctx && (S.ctx.countries || []).length) cb.hidden = false;
+      pills(); submit();
+      return;
+    }
+    if (el.hasAttribute('data-more')) {
+      var turn = turnById(el.getAttribute('data-more')), box = turn && $('hits-' + turn.id);
+      if (!box) return;
+      M.flip($('turn-' + turn.id), function () { turn.all = !turn.all; box.innerHTML = hitsHtml(turn); }).then(function () { var b = box.querySelector('.more-btn'); if (b) b.focus({ preventScroll: true }); });
+      return;
+    }
+    if (el.hasAttribute('data-copy')) { var tc = turnById(el.getAttribute('data-copy')); if (tc && tc.result && tc.result.draft) copyText(tc.result.draft.markup || '', el); return; }
+    if (el.hasAttribute('data-again')) { var ta2 = turnById(el.getAttribute('data-again')); if (ta2 && !S.busy) { ta2.state = 'run'; ta2.step = 0; var a = $('a-' + ta2.id); if (a) { a.classList.remove('in'); a.innerHTML = answerHtml(ta2); } runTurn(ta2); } return; }
+    if (el.hasAttribute('data-recalc')) { if (!S.data.busy) loadData(true); return; }
+    if (el.hasAttribute('data-reload')) { S.fatal = ''; boot(); }
   });
 
-  load(window.BOOT ? window.BOOT.path : (location.hash.replace(/^#/, '') === '/daten' ? '/daten' : '/abgleich'));
+  window.addEventListener('hashchange', function () {
+    var p = location.hash.replace(/^#/, '') === '/daten' ? '/daten' : '/abgleich';
+    if (p === S.path && !S.pending) return;
+    go(p);
+    if (S.pending) { S.pending = false; submit(); }
+  });
+  window.addEventListener('resize', function () { pills(true); modal(); });
+
+  M.init();
+  S.path = window.BOOT ? window.BOOT.path : (location.hash.replace(/^#/, '') === '/daten' ? '/daten' : '/abgleich');
+  if (S.path === '/daten') { drawAll(); loadData(false); } else boot();
 })();
 </script>

@@ -433,7 +433,7 @@ test('Seite ohne Kommentare (minify): Skripte bleiben gültig, die Oberfläche z
     return app.innerHTML;
   };
   const full = drawn(false);
-  assert.ok(/ADF-1021/.test(full) && /id="markup"/.test(full) && /h-verdict/.test(full), full.slice(0, 300));
+  assert.ok(/ADF-1021/.test(full) && /data-copy=/.test(full) && /h-verdict/.test(full) && /class="composer"/.test(full), full.slice(0, 300));
   assert.strictEqual(drawn(true), full);
   assert.strictEqual(stripJs("var a = 1 / 2; // x\nvar r = /\\/\\/[^/]*/g; /* y */ var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;"),
     "var a = 1 / 2;\nvar r = /\\/\\/[^/]*/g;  var s = '// z';\nvar t = `a ${ {b: 1}.b } // c`;");
